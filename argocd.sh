@@ -23,5 +23,3 @@ else
      printf "Cancel run, please %s [init|start|stop]\n" "$0"
 fi
 
-# run access to argocd
-# minikube service argocd-server -n argocd --url
