@@ -1,0 +1,17 @@
+provider: coredns
+interval: 1s
+sources:
+  - service
+  - ingress
+logFormat: json
+publishInternalServices: true
+coredns:
+  etcdEndpoints: https://etcd.etcd.svc.cluster.local:2379
+  etcdTLS:
+    enabled: true
+    secretName: etcd-client-tls
+    certFilename: tls.crt
+    keyFilename: tls.key
+domainFilters:
+  - example.com.
+txtOwnerId: cluster-1

@@ -1,0 +1,6 @@
+auth:
+ rbac:
+   create: false
+   allowNoneAuthentication: true
+   rootPassword: Pa55w()rd
+

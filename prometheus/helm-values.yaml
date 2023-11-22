@@ -1,0 +1,38 @@
+alertmanager:
+  enabled: false
+kube-state-metrics:
+  enabled: false
+prometheus-pushgateway:
+  enabled: false
+
+server:
+  extraSecretMounts:
+    - name: etcd-ca
+      mountPath: /etc/config/secrets
+      subPath: ""
+      secretName: etcd-ca
+      readOnly: true
+
+extraScrapeConfigs: |
+  - job_name: etcd
+    scheme: https
+    kubernetes_sd_configs:
+    - role: pod
+    relabel_configs:
+    - action: keep
+      source_labels:
+      - __meta_kubernetes_namespace
+      - __meta_kubernetes_pod_name
+      separator: '/'
+      regex: 'etcd/etcd.+'
+    - source_labels:
+      - __address__
+      action: replace
+      target_label: __address__
+      regex: (.+?)(\\:\\d)
+      replacement: $1:2379
+    tls_config:
+      ca_file: /etc/config/secrets/ca.crt
+      cert_file: /etc/config/secrets/tls.crt
+      key_file: /etc/config/secrets/tls.key
+      server_name: localhost

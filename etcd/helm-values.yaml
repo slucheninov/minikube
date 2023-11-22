@@ -1,0 +1,27 @@
+auth:
+  rbac:
+    enabled: false
+    create: false
+    allowNoneAuthentication: true
+    rootPassword: Pa55w()rd
+  client:
+    enableAuthentication: true
+    useAutoTLS: false
+    secureTransport: true
+    existingSecret: etcd-client-tls
+    certFilename: tls.crt
+    certKeyFilename: tls.key
+    caFilename: ca.crt
+  peer:
+    enableAuthentication: true
+    useAutoTLS: true
+    secureTransport: true
+    existingSecret: etcd-peer-tls
+    certFilename: tls.crt
+    certKeyFilename: tls.key
+    caFilename: ca.crt
+replicaCount: 3
+logLevel: error
+
+metrics:
+  enabled: true

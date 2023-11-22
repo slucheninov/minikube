@@ -1,0 +1,14 @@
+
+"@":
+    {
+        "soa":{ "ttl" : 60,  "minttl": 60, "mbox" : "dns-admin.examples.com.", "ns" : "ns1.examples.com.", "refresh" : 900, "retry" : 900, "expire" : 1800},
+        "ns":[{"host" : "ns1.examples.com.","ttl" : 360}, { "host" : "ns2.examples.com.", "ttl" : 360}],
+        "txt":[{ "text" : "this is a text", "ttl" : 360 }],
+        "a":[{"ip" : "1.1.1.1", "ttl" : 360, "server":"k8s-prod-41"},{"ip" : "1.1.1.2", "ttl" : 360,"server":"k8s-prod-5"}]
+    }
+
+"mongodb-retention":
+    {
+        "a":[{"ip" : "1.1.2.1", "ttl" : 360, "server":"k8s-prod-41"},{"ip" : "1.1.2.2", "ttl" : 360, "server":"k8s-prod-5"}],
+        "txt":[{ "text" : "this is a text", "ttl" : 360}]
+    }
