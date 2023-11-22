@@ -14,9 +14,9 @@ case $1 in
        minikube delete -p cluster-1
        ;;
      *)
-       printf "please $0 [start|stop]\n"
+       printf "please %s [start|stop]\n" "$0"
        ;;
 esac
 else
-     printf "Cancel run, please  $0 [start|stop]\n"
+     printf "Cancel run, please %s [start|stop]\n" "$0"
 fi

@@ -23,9 +23,9 @@ case $1 in
        #kubectl delete -f etcd/cert-manager.yaml
        ;;
      *)
-       printf "please $0 [init|start|stop]\n"
+       printf "please %s [init|start|stop]\n" "$0"
        ;;
 esac
 else
-     printf "Cancel run, please  $0 [init|start|stop]\n"
+     printf "Cancel run, please %s [init|start|stop]\n" "$0"
 fi
