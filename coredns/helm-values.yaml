@@ -14,7 +14,7 @@ resources:
     memory: 128Mi
 
 
-serviceType: "ClusterIP"
+serviceType: ClusterIP
 
 prometheus:
   service:
@@ -33,8 +33,8 @@ servers:
   - name: log
   - name: errors
   - name: ready
-  - name: cache
-    parameters: 60
+  # - name: cache
+  #   parameters: 60
   - name: reload
   - name: health
     configBlock: |-
