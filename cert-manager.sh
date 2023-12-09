@@ -6,7 +6,7 @@ if [[ -n $1 ]]; then
 case $1 in
      init)
        helm repo add cert-manager https://charts.jetstack.io
-       helm repo update
+         helm repo update
        ;;
      start)
        helm upgrade --install $NAME cert-manager/cert-manager --version $VERSION \

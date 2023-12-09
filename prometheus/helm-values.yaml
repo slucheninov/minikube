@@ -1,3 +1,6 @@
+rbac:
+  create: true
+
 alertmanager:
   enabled: false
 kube-state-metrics:
