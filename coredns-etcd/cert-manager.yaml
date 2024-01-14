@@ -2,7 +2,7 @@ apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
   name: selfsigned-issuer
-  namespace: etcd
+  #namespace: etcd
 spec:
   selfSigned: {}
 ---
@@ -10,7 +10,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: etcd-ca
-  namespace: etcd
+  #namespace: etcd
 spec:
   isCA: true
   secretName: etcd-ca
@@ -27,7 +27,7 @@ apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
   name: etcd-cluster-issuer
-  namespace: etcd
+  #namespace: etcd
 spec:
   ca:
     secretName: etcd-ca
@@ -36,7 +36,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: etcd-client
-  namespace: etcd
+  #namespace: etcd
 spec:
   secretName: etcd-client-tls
   duration: 17520h # 730d
@@ -57,13 +57,17 @@ spec:
     - "*.etcd.etcd.svc.cluster.local"
     - "*.etcd-headless.etcd.svc.cluster.local"
     - "etcd.etcd.svc.cluster.local"
+    - "*.etcd.coredns.svc.cluster.local"
+    - "*.etcd-headless.coredns.svc.cluster.local"
+    - "etcd.coredns.svc.cluster.local"
+    - "etcd.coredns.ecmplb.com"
     - "localhost"
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: etcd-peer
-  namespace: etcd
+  #namespace: etcd
 spec:
   secretName: etcd-peer-tls
   duration: 17520h # 730d
@@ -84,3 +88,7 @@ spec:
     - "*.etcd.etcd.svc.cluster.local"
     - "*.etcd-headless.etcd.svc.cluster.local"
     - "etcd.etcd.svc.cluster.local"
+    - "*.etcd.coredns.svc.cluster.local"
+    - "*.etcd-headless.coredns.svc.cluster.local"
+    - "etcd.coredns.svc.cluster.local"
+    - "etcd.coredns.ecmplb.com"

@@ -3,15 +3,56 @@
   # Overrides the image tag whose default is the chart appVersion.
   # tag: "0.1.1"
 
+deployment:
+  enabled: true
+  name: "coredns"
+
+customLabels:
+  app: coredns
+  coredns-agent-auto: "enabled"
+  coredns-agent-ttl: "0"
+
 isClusterService: false
+
+rollingUpdate:
+  maxUnavailable: 1
+  maxSurge: 50%
+
+# readinessProbe:
+#   initialDelaySeconds: 10
+#   periodSeconds: 10
+#   timeoutSeconds: 5
+#   successThreshold: 1
+#   failureThreshold: 3
+
+# livenessProbe:
+#   initialDelaySeconds: 20
+#   periodSeconds: 10
+#   timeoutSeconds: 5
+#   successThreshold: 1
+#   failureThreshold: 3
+
+#replicaCount: 3
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - resource:
+        name: cpu
+        target:
+          averageUtilization: 100
+          type: Utilization
+      type: Resource
 
 resources:
   limits:
-    cpu: 100m
+    cpu: 1
     memory: 128Mi
   requests:
-    cpu: 100m
-    memory: 128Mi
+    cpu: 500m
+    memory: 64Mi
 
 
 serviceType: ClusterIP
@@ -43,8 +84,20 @@ servers:
   - name: etcd
     configBlock: |-
       path /skydns
-      endpoint https://etcd.etcd.svc.cluster.local:2379
+      endpoint https://etcd.coredns.svc.cluster.local:2379
       tls /etc/coredns/cert/tls.crt /etc/coredns/cert/tls.key /etc/coredns/cert/ca.crt
+  - name: template
+      IN SOA
+    configBlock: |-
+        rcode NOERROR
+        authority "{{ .Zone }} 300 {{ .Class }} SOA ns1.dns.ecmplb.com. hostmaster.coredns.ecmplb.com (2023121902 14400 3600 604800 10)"
+  - name: template
+      IN NS
+    configBlock: |-
+        answer "{{ .Name }} 3600 IN NS ns1.dns.ecmplb.com."
+        additional "ns1.dns.ecmplb.com. 3600 IN A 34.91.163.52"
+        fallthrough
+
   #   credentials root Pa55w()rd
   # - name: acl
   #   configBlock: |-
@@ -54,6 +107,7 @@ servers:
   #   configBlock: |-
   #     to *
 
+# for TLS cert
 extraSecrets:
   - name: etcd-client-tls
     mountPath: /etc/coredns/cert

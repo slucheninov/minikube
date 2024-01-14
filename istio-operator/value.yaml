@@ -1,0 +1,74 @@
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  namespace: istio-system
+  name: istio-control-plane
+spec:
+  values:
+    gateways:
+      istio-ingressgateway:
+        env:
+          ISTIO_META_UNPRIVILEGED_POD: ""
+        runAsRoot: true
+    global:
+      autoscalingv2API: true
+  profile: default
+  meshConfig:
+    enableAutoMtls: false
+    accessLogEncoding: JSON
+    defaultConfig:
+      proxyMetadata:
+        TERMINATION_DRAIN_DURATION_SECONDS: "10"
+        ISTIO_META_DNS_CAPTURE: "true"
+        ISTIO_META_DNS_AUTO_ALLOCATE: "true"
+        BOOTSTRAP_XDS_AGENT: "true"
+  addonComponents:
+    pilot:
+      enabled: true
+  components:
+    pilot:
+      enabled: true
+    ingressGateways:
+    - enabled: true
+      name: istio-ingressgateway
+      label:
+        app: istio-ingressgateway
+        istio: ingressgateway
+      k8s:
+        env:
+        - name: ISTIO_METAJSON_STATS
+          value: |
+            {"sidecar.istio.io/statsInclusionRegexps": ".*outlier_detection.*"}
+        - name: BOOTSTRAP_XDS_AGENT
+          value: "true"
+        hpaSpec:
+          minReplicas: 1
+          maxReplicas: 3
+          metrics:
+          - resource:
+              name: cpu
+              target:
+                type: Utilization
+                averageUtilization: 80
+            type: Resource
+          scaleTargetRef:
+            apiVersion: apps/v1
+            kind: Deployment
+            name: istio-ingressgateway
+        service:
+          type: LoadBalancer
+          #loadBalancerIP: {{ .Values.istioControlPlane.externalLoadBalancerIP }}
+          ports:
+          - port: 80
+            targetPort: 8080
+            name: http2
+          - port: 443
+            targetPort: 8443
+            name: https
+          - port: 53
+            targetPort: 5353
+            name: tcp-dns
+        strategy:
+          rollingUpdate:
+            maxSurge: 100%
+            maxUnavailable: 25%

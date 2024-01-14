@@ -25,3 +25,22 @@ logLevel: error
 
 metrics:
   enabled: true
+
+podLabels:
+  app: coredns-etcd
+
+commonLabels:
+  "coredns-agent-auto": "enabled"
+  "coredns-agent-ttl": "10"
+
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - coredns-etcd
+      topologyKey: kubernetes.io/hostname
+

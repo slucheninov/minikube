@@ -1,12 +1,12 @@
 server:
-  replicas: 2
+  replicas: 1
   ingress:
     enabled: true
   extraArgs:
   - --insecure
-  service:
-    type: NodePort
-    nodePortHttp: 30180
+  # service:
+  #   type: NodePort
+  #   nodePortHttp: 30180
 controller:
   args:
     appResyncPeriod: 30

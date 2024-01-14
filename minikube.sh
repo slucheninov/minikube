@@ -1,11 +1,12 @@
 #!/usr/bin/env zsh
 # link https://kubernetes.io/releases/
-VERSION=v1.26.11
+VERSION=1.25.10
+#VERSION=v1.28.5
 
 if [[ -n $1 ]]; then
 case $1 in
      start)
-       minikube start --kubernetes-version=$VERSION -p cluster-1 --image-repository=gcr.io
+       minikube start --kubernetes-version=$VERSION -p cluster-1
        ;;
      stop)
        minikube stop -p cluster-1

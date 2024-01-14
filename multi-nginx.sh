@@ -1,4 +1,9 @@
 #!/usr/bin/env zsh
+# Example: ./multi-nginx.sh init
+# Example: ./multi-nginx.sh start [NAME] [NAMESPACE]
+# Example: ./multi-nginx.sh start nginx-1 nginx-1
+# Example: ./multi-nginx.sh start nginx-2 nginx-2
+#
 NAME=nginx
 VERSION=15.3.4
 NAMESPACE=$NAME

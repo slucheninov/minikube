@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 NAME=coredns
-VERSION=1.28.1
-NAMESPACE=etcd
+VERSION=1.28.2
+NAMESPACE=coredns
 if [[ -n $1 ]]; then
 case $1 in
      init)
