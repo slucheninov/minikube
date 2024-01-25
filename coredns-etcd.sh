@@ -10,15 +10,14 @@ case $1 in
        ;;
      start)
        kubectl create namespace $NAMESPACE
-       kubectl apply -f coredns-etcd/cert-manager.yaml -n $NAMESPACE
+       kubectl apply -f coredns-etcd/secrets.yaml -n $NAMESPACE
        sleep 5
        helm upgrade --install $NAME bitnami/etcd --version $VERSION \
          --namespace $NAMESPACE --create-namespace --wait --values coredns-etcd/helm-values.yaml
        ;;
      stop)
        helm uninstall $NAME --namespace $NAMESPACE
-       #kubectl delete secret etcd-client-certs --namespace $NAMESPACE
-       #kubectl delete -f etcd/cert-manager.yaml
+       kubectl delete -f etcd/secrets.yaml
        ;;
      *)
        printf "please %s [init|start|stop]\n" "$0"

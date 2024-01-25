@@ -15,8 +15,8 @@ customLabels:
 isClusterService: false
 
 rollingUpdate:
-  maxUnavailable: 1
-  maxSurge: 50%
+  maxUnavailable: 25%
+  maxSurge: 100%
 
 # readinessProbe:
 #   initialDelaySeconds: 10
@@ -36,7 +36,7 @@ rollingUpdate:
 
 hpa:
   enabled: true
-  minReplicas: 2
+  minReplicas: 1
   maxReplicas: 10
   metrics:
     - resource:
@@ -51,7 +51,7 @@ resources:
     cpu: 1
     memory: 128Mi
   requests:
-    cpu: 500m
+    cpu: 100m
     memory: 64Mi
 
 
@@ -74,8 +74,8 @@ servers:
   - name: log
   - name: errors
   - name: ready
-  # - name: cache
-  #   parameters: 60
+  - name: prometheus
+    parameters: 0.0.0.0:9153
   - name: reload
   - name: health
     configBlock: |-
@@ -95,20 +95,10 @@ servers:
       IN NS
     configBlock: |-
         answer "{{ .Name }} 3600 IN NS ns1.dns.ecmplb.com."
-        additional "ns1.dns.ecmplb.com. 3600 IN A 34.91.163.52"
         fallthrough
-
-  #   credentials root Pa55w()rd
-  # - name: acl
-  #   configBlock: |-
-  #     allow type AXFR net *
-  #     allow type IXFR net *
-  # - name: transfer
-  #   configBlock: |-
-  #     to *
 
 # for TLS cert
 extraSecrets:
-  - name: etcd-client-tls
+  - name: etcd-main-tls
     mountPath: /etc/coredns/cert
     defaultMode: 420

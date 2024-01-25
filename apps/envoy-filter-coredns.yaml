@@ -1,0 +1,95 @@
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: envoy-filter-coredns
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+    - applyTo: LISTENER
+      match:
+        context: GATEWAY
+      patch:
+        operation: ADD
+        value:
+          name: tcp_dns_listener
+          address:
+            socket_address:
+              protocol: TCP
+              address: 0.0.0.0
+              port_value: 5353
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.tcp_proxy
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+                    stat_prefix: tcp_dns
+                    cluster: dns_cluster
+    - applyTo: LISTENER
+      match:
+        context: GATEWAY
+      patch:
+        operation: ADD
+        value:
+          name: tcp_udp_listener
+          address:
+            socket_address:
+              protocol: UDP
+              address: 0.0.0.0
+              port_value: 5353
+          udp_listener_config:
+            downstream_socket_config:
+              max_rx_datagram_size: 9000
+          listener_filters:
+            - name: envoy.filters.udp_listener.udp_proxy
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.udp.udp_proxy.v3.UdpProxyConfig
+                stat_prefix: udp_dns
+                matcher:
+                  on_no_match:
+                    action:
+                      name: route
+                      typed_config:
+                        '@type': type.googleapis.com/envoy.extensions.filters.udp.udp_proxy.v3.Route
+                        cluster: dns_cluster
+                upstream_socket_config:
+                  max_rx_datagram_size: 9000
+                idle_timeout: 0.5s
+                use_per_packet_load_balancing: false
+    - applyTo: CLUSTER
+      patch:
+        operation: ADD
+        value:
+          name: dns_cluster
+          connect_timeout: 0.25s
+          type: STRICT_DNS
+          lb_policy: ROUND_ROBIN
+          dns_lookup_family: V4_ONLY
+          dns_refresh_rate: 0.1s
+          health_checks:
+          - timeout: 0.5s
+            interval: 1s
+            unhealthy_threshold: 2
+            healthy_threshold: 1
+            http_health_check:
+              path: "/health"
+          load_assignment:
+            cluster_name: dns_cluster
+            endpoints:
+            - lb_endpoints:
+              - endpoint:
+                  health_check_config:
+                    port_value: 8080
+                  address:
+                    socket_address:
+                      # only services
+                      address: coredns-coredns.coredns.svc.cluster.local
+                      port_value: 53
+          upstream_connection_options:
+            tcp_keepalive:
+              keepalive_probes: 3
+              keepalive_time: 120
+              keepalive_interval: 20

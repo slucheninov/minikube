@@ -4,11 +4,13 @@ auth:
     create: false
     allowNoneAuthentication: true
     rootPassword: Pa55w()rd
+  token:
+    enabled: false
   client:
     enableAuthentication: true
     useAutoTLS: false
     secureTransport: true
-    existingSecret: etcd-client-tls
+    existingSecret: etcd-main-tls
     certFilename: tls.crt
     certKeyFilename: tls.key
     caFilename: ca.crt
@@ -16,7 +18,7 @@ auth:
     enableAuthentication: true
     useAutoTLS: true
     secureTransport: true
-    existingSecret: etcd-peer-tls
+    existingSecret: etcd-main-tls
     certFilename: tls.crt
     certKeyFilename: tls.key
     caFilename: ca.crt
@@ -25,6 +27,7 @@ logLevel: error
 
 metrics:
   enabled: true
+  useSeparateEndpoint: true
 
 podLabels:
   app: coredns-etcd
@@ -33,14 +36,14 @@ commonLabels:
   "coredns-agent-auto": "enabled"
   "coredns-agent-ttl": "10"
 
-affinity:
-  podAntiAffinity:
-    requiredDuringSchedulingIgnoredDuringExecution:
-    - labelSelector:
-        matchExpressions:
-        - key: app
-          operator: In
-          values:
-          - coredns-etcd
-      topologyKey: kubernetes.io/hostname
+# affinity:
+#   podAntiAffinity:
+#     requiredDuringSchedulingIgnoredDuringExecution:
+#     - labelSelector:
+#         matchExpressions:
+#         - key: app
+#           operator: In
+#           values:
+#           - coredns-etcd
+#       topologyKey: kubernetes.io/hostname
 

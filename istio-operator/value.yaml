@@ -68,6 +68,10 @@ spec:
           - port: 53
             targetPort: 5353
             name: tcp-dns
+          - port: 53
+            targetPort: 5353
+            name: udp-dns
+            protocol: UDP
         strategy:
           rollingUpdate:
             maxSurge: 100%
