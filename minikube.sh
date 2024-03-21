@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 # link https://kubernetes.io/releases/
-VERSION=1.25.10
+VERSION=1.26.14
 #VERSION=v1.28.5
 
 if [[ -n $1 ]]; then

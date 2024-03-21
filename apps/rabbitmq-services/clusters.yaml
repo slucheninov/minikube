@@ -73,6 +73,20 @@ spec:
                   readOnlyRootFilesystem: true
                   runAsNonRoot: true
                   runAsUser: 10002
+            dnsPolicy: "None"
+            dnsConfig:
+              nameservers:
+                - 10.96.0.10
+              searches:
+                - k8s-rabbitmq-services-nodes.rabbitmq-services.svc.cluster.local
+                - rabbitmq-services.svc.cluster.local
+                - svc.cluster.local
+                - cluster.local
+                # - node.consul
+                # - service.consul
+              options:
+                - name: ndots
+                  value: "5"
   service:
       type: ClusterIP
   rabbitmq:
@@ -90,3 +104,6 @@ spec:
     additionalPlugins:
       - rabbitmq_consistent_hash_exchange
       - rabbitmq_sharding
+  persistence:
+    storageClassName: standard
+    storage: "2Gi"
