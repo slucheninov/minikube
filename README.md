@@ -12,7 +12,7 @@ Original
 ```bash
 kubectl run -it --rm --restart=Never busybox --image=alpine3.18 sh
 ```
-
+Old
 ```bash
 $ minikube addons configure registry-creds -p cluster-1   
 
@@ -28,4 +28,12 @@ Do you want to enable Azure Container Registry? [y/n]: n
 ✅  registry-creds was successfully configured
 $
 $ minikube addons enable registry-creds -p cluster-1
+```
+
+# Artifact Regestry
+https://minikube.sigs.k8s.io/docs/handbook/addons/gcp-auth/
+
+```sh
+export GOOGLE_APPLICATION_CREDENTIALS=/Users/lucheninov/.config/gcloud/application_default_credentials.json
+$ minikube addons enable gcp-auth -p cluster-1
 ```

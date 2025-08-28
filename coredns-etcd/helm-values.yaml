@@ -23,10 +23,10 @@ auth:
     certKeyFilename: tls.key
     caFilename: ca.crt
 replicaCount: 3
-logLevel: error
+logLevel: info
 
 metrics:
-  enabled: true
+  enabled: false
   useSeparateEndpoint: true
 
 podLabels:

@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 NAME=etcd
-VERSION=9.5.6
+VERSION=11.1.3
 NAMESPACE=coredns
 if [[ -n $1 ]]; then
 case $1 in
@@ -17,7 +17,8 @@ case $1 in
        ;;
      stop)
        helm uninstall $NAME --namespace $NAMESPACE
-       kubectl delete -f etcd/secrets.yaml
+       kubectl delete -f coredns-etcd/secrets.yaml -n $NAMESPACE
+       kubectl delete namespace $NAMESPACE
        ;;
      *)
        printf "please %s [init|start|stop]\n" "$0"

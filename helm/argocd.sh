@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 NAME=argocd
-VERSION=5.36.3
+VERSION=8.0.0
 NAMESPACE=$NAME
 if [[ -n $1 ]]; then
 case $1 in

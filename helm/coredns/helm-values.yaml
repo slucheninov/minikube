@@ -68,7 +68,7 @@ prometheus:
 # https://kubernetes.io/docs/tasks/administer-cluster/dns-custom-nameservers/#coredns-configmap-options
 servers:
 - zones:
-  - zone: coredns.testing.com
+  - zone: coredns.ecmplb.com
   port: 53
   plugins:
   - name: log
@@ -90,11 +90,11 @@ servers:
       IN SOA
     configBlock: |-
         rcode NOERROR
-        authority "{{ .Zone }} 300 {{ .Class }} SOA ns1.dns.testing.com. hostmaster.coredns.testing.com (2023121902 14400 3600 604800 10)"
+        authority "{{ .Zone }} 300 {{ .Class }} SOA ns1.dns.coredns.ecmplb.com. hostmaster.coredns.ecmplb.com (2023121902 14400 3600 604800 10)"
   - name: template
       IN NS
     configBlock: |-
-        answer "{{ .Name }} 3600 IN NS ns1.dns.testing.com."
+        answer "{{ .Name }} 3600 IN NS ns1.dns.coredns.ecmplb.com."
         fallthrough
 
 # for TLS cert

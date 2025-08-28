@@ -60,7 +60,11 @@ spec:
     - "*.etcd.coredns.svc.cluster.local"
     - "*.etcd-headless.coredns.svc.cluster.local"
     - "etcd.coredns.svc.cluster.local"
-    - "etcd.coredns.ecmplb.com"
+    - "etcd.coredns-etcd.ecmplb.com"
+    - "*.etcd.coredns-etcd.svc.cluster.local"
+    - "*.etcd-headless.coredns-etcd.svc.cluster.local"
+    - "etcd.coredns-etcd.svc.cluster.local"
+    - "etcd.coredns-etcd.ecmplb.com"
     - "localhost"
 ---
 apiVersion: cert-manager.io/v1
@@ -92,3 +96,9 @@ spec:
     - "*.etcd-headless.coredns.svc.cluster.local"
     - "etcd.coredns.svc.cluster.local"
     - "etcd.coredns.ecmplb.com"
+    - "etcd.coredns-etcd.ecmplb.com"
+    - "*.etcd.coredns-etcd.svc.cluster.local"
+    - "*.etcd-headless.coredns-etcd.svc.cluster.local"
+    - "etcd.coredns-etcd.svc.cluster.local"
+    - "etcd.coredns-etcd.ecmplb.com"
+    

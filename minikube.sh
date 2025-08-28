@@ -1,7 +1,6 @@
 #!/usr/bin/env zsh
 # link https://kubernetes.io/releases/
-VERSION=1.26.14
-#VERSION=v1.28.5
+VERSION=1.33.4
 
 if [[ -n $1 ]]; then
 case $1 in
