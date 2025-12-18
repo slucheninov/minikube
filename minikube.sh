@@ -1,22 +1,329 @@
 #!/usr/bin/env zsh
-# link https://kubernetes.io/releases/
-VERSION=1.33.4
+#
+# Universal Minikube cluster management script
+# Supports single and multi-cluster setups with optional metrics-server installation
+#
+# Usage:
+#   ./minikube.sh [command] [options]
+#
+# Commands:
+#   start       - Start cluster(s)
+#   stop        - Stop cluster(s)
+#   delete      - Delete cluster(s)
+#   status      - Show cluster status
+#   metrics     - Install/uninstall metrics-server
+#
+# Environment variables:
+#   CLUSTERS          - Comma-separated list of cluster names (default: cluster-1)
+#   K8S_VERSION       - Kubernetes version (default: 1.33.6)
+#   CNI               - CNI plugin: cilium, calico, or none (default: none)
+#   SERVICE_CIDR      - Service cluster IP range (default: auto)
+#   METRICS_SERVER    - Install metrics-server: true/false (default: false)
+#   METRICS_VERSION   - Metrics-server Helm chart version (default: 3.11.0)
+#
 
-if [[ -n $1 ]]; then
-case $1 in
-     start)
-       minikube start --kubernetes-version=$VERSION -p cluster-1
-       ;;
-     stop)
-       minikube stop -p cluster-1
-       ;;
-     delete)
-       minikube delete -p cluster-1
-       ;;
-     *)
-       printf "please %s [start|stop]\n" "$0"
-       ;;
-esac
-else
-     printf "Cancel run, please %s [start|stop]\n" "$0"
-fi
+set -euo pipefail
+
+# Default configuration
+readonly DEFAULT_CLUSTERS="cluster-1"
+readonly DEFAULT_K8S_VERSION="1.33.6"
+readonly DEFAULT_CNI=""
+readonly DEFAULT_METRICS_SERVER="false"
+readonly DEFAULT_METRICS_VERSION="3.11.0"
+readonly METRICS_NAMESPACE="kube-system"
+readonly METRICS_NAME="metrics-server"
+readonly METRICS_REPO="https://kubernetes-sigs.github.io/metrics-server/"
+readonly SCRIPT_DIR="$(cd "$(dirname "${(%):-%x}")" && pwd)"
+readonly SCRIPT_NAME="$(basename "${(%):-%x}")"
+
+# Configuration from environment or defaults
+CLUSTERS="${CLUSTERS:-${DEFAULT_CLUSTERS}}"
+K8S_VERSION="${K8S_VERSION:-${DEFAULT_K8S_VERSION}}"
+CNI="${CNI:-${DEFAULT_CNI}}"
+METRICS_SERVER="${METRICS_SERVER:-${DEFAULT_METRICS_SERVER}}"
+METRICS_VERSION="${METRICS_VERSION:-${DEFAULT_METRICS_VERSION}}"
+
+# Service CIDR mapping for multi-cluster setups
+typeset -A SERVICE_CIDR_MAP
+SERVICE_CIDR_MAP[cluster-1]="172.16.1.0/24"
+SERVICE_CIDR_MAP[cluster-2]="172.16.2.0/24"
+SERVICE_CIDR_MAP[cluster-3]="172.16.3.0/24"
+
+# Colors for output
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly NC='\033[0m' # No Color
+
+# Helper functions
+log_info() {
+  echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+log_warn() {
+  echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+  echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+# Get service CIDR for a cluster
+get_service_cidr() {
+  local cluster=$1
+  if [[ -n "${SERVICE_CIDR:-}" ]]; then
+    echo "${SERVICE_CIDR}"
+  elif [[ -n "${SERVICE_CIDR_MAP[$cluster]:-}" ]]; then
+    echo "${SERVICE_CIDR_MAP[$cluster]}"
+  else
+    echo ""
+  fi
+}
+
+# Build minikube start command
+build_start_command() {
+  local cluster=$1
+  local cmd="minikube start --kubernetes-version=${K8S_VERSION} -p ${cluster}"
+  
+  if [[ -n "${CNI}" ]]; then
+    cmd="${cmd} --cni=${CNI}"
+  fi
+  
+  local service_cidr=$(get_service_cidr "${cluster}")
+  if [[ -n "${service_cidr}" ]]; then
+    cmd="${cmd} --service-cluster-ip-range=${service_cidr}"
+  fi
+  
+  echo "${cmd}"
+}
+
+# Start cluster(s)
+start_clusters() {
+  log_info "Starting Minikube cluster(s)..."
+  log_info "Configuration:"
+  log_info "  Clusters: ${CLUSTERS}"
+  log_info "  Kubernetes version: ${K8S_VERSION}"
+  log_info "  CNI: ${CNI:-default}"
+  log_info "  Metrics-server: ${METRICS_SERVER}"
+  
+  local cluster_array=("${(@s:,:)CLUSTERS}")
+  
+  for cluster in "${cluster_array[@]}"; do
+    log_info "Starting cluster: ${cluster}"
+    local cmd=$(build_start_command "${cluster}")
+    eval "${cmd}"
+  done
+  
+  # Install metrics-server if enabled
+  if [[ "${METRICS_SERVER}" == "true" ]]; then
+    log_info "Installing metrics-server..."
+    install_metrics_server
+  fi
+  
+  log_info "All clusters started successfully!"
+  show_status
+}
+
+# Stop cluster(s)
+stop_clusters() {
+  log_info "Stopping Minikube cluster(s)..."
+  
+  local cluster_array=("${(@s:,:)CLUSTERS}")
+  
+  for cluster in "${cluster_array[@]}"; do
+    log_info "Stopping cluster: ${cluster}"
+    minikube stop -p "${cluster}" || log_warn "Failed to stop ${cluster}"
+  done
+  
+  log_info "All clusters stopped!"
+}
+
+# Delete cluster(s)
+delete_clusters() {
+  log_warn "This will delete all cluster data!"
+  read -q "REPLY?Are you sure? (y/N): "
+  echo
+  
+  if [[ ! "${REPLY}" =~ ^[Yy]$ ]]; then
+    log_info "Cancelled."
+    return
+  fi
+  
+  log_info "Deleting Minikube cluster(s)..."
+  
+  local cluster_array=("${(@s:,:)CLUSTERS}")
+  
+  for cluster in "${cluster_array[@]}"; do
+    log_info "Deleting cluster: ${cluster}"
+    minikube delete -p "${cluster}" || log_warn "Failed to delete ${cluster}"
+  done
+  
+  log_info "All clusters deleted!"
+}
+
+# Show cluster status
+show_status() {
+  log_info "Cluster status:"
+  echo
+  
+  local cluster_array=("${(@s:,:)CLUSTERS}")
+  
+  for cluster in "${cluster_array[@]}"; do
+    echo "=== ${cluster} ==="
+    minikube status -p "${cluster}" 2>/dev/null || log_warn "Cluster ${cluster} is not running"
+    echo
+  done
+}
+
+# Initialize metrics-server Helm repository
+init_metrics_server() {
+  log_info "Initializing metrics-server Helm repository..."
+  helm repo add metrics-server "${METRICS_REPO}" 2>/dev/null || true
+  helm repo update
+  log_info "Metrics-server repository initialized!"
+}
+
+# Install metrics-server
+install_metrics_server() {
+  log_info "Installing metrics-server..."
+  
+  # Initialize repo if needed
+  if ! helm repo list | grep -q metrics-server; then
+    init_metrics_server
+  fi
+  
+  # Use first cluster for metrics-server installation
+  local cluster_array=("${(@s:,:)CLUSTERS}")
+  local primary_cluster="${cluster_array[1]}"
+  
+  log_info "Switching to cluster: ${primary_cluster}"
+  minikube profile "${primary_cluster}"
+  
+  # Install with default values for Minikube compatibility
+  log_info "Installing with default values (kubelet-insecure-tls for Minikube compatibility)"
+  helm upgrade --install "${METRICS_NAME}" metrics-server/metrics-server \
+    --version "${METRICS_VERSION}" \
+    --namespace "${METRICS_NAMESPACE}" \
+    --create-namespace \
+    --wait \
+    --set "args[0]=--kubelet-insecure-tls"
+  
+  log_info "Metrics-server installed successfully!"
+}
+
+# Uninstall metrics-server
+uninstall_metrics_server() {
+  log_info "Uninstalling metrics-server..."
+  
+  local cluster_array=("${(@s:,:)CLUSTERS}")
+  local primary_cluster="${cluster_array[1]}"
+  
+  log_info "Switching to cluster: ${primary_cluster}"
+  minikube profile "${primary_cluster}"
+  
+  helm uninstall "${METRICS_NAME}" --namespace "${METRICS_NAMESPACE}" 2>/dev/null || \
+    log_warn "Metrics-server not found or already uninstalled"
+  
+  log_info "Metrics-server uninstalled!"
+}
+
+# Show usage information
+show_usage() {
+  cat << EOF
+Universal Minikube Cluster Management Script
+
+Usage:
+  ${SCRIPT_NAME} [command] [options]
+
+Commands:
+  start              Start cluster(s)
+  stop               Stop cluster(s)
+  delete             Delete cluster(s) (with confirmation)
+  status             Show cluster status
+  metrics install    Install metrics-server
+  metrics uninstall  Uninstall metrics-server
+  help               Show this help message
+
+Environment Variables:
+  CLUSTERS           Comma-separated list of cluster names (default: cluster-1)
+  K8S_VERSION        Kubernetes version (default: 1.33.6)
+  CNI                CNI plugin: cilium, calico, or empty for default (default: empty)
+  SERVICE_CIDR       Service cluster IP range (default: auto-assigned)
+  METRICS_SERVER     Install metrics-server on start: true/false (default: false)
+  METRICS_VERSION    Metrics-server Helm chart version (default: 3.11.0)
+
+Examples:
+  # Start single cluster
+  ${SCRIPT_NAME} start
+
+  # Start multiple clusters with Cilium CNI
+  CLUSTERS="cluster-1,cluster-2" CNI=cilium ${SCRIPT_NAME} start
+
+  # Start cluster with metrics-server
+  METRICS_SERVER=true ${SCRIPT_NAME} start
+
+  # Install metrics-server separately
+  ${SCRIPT_NAME} metrics install
+
+  # Show cluster status
+  ${SCRIPT_NAME} status
+
+  # Stop all clusters
+  ${SCRIPT_NAME} stop
+
+  # Delete all clusters
+  ${SCRIPT_NAME} delete
+EOF
+}
+
+# Main command handler
+main() {
+  local command="${1:-}"
+  
+  case "${command}" in
+    start)
+      start_clusters
+      ;;
+    stop)
+      stop_clusters
+      ;;
+    delete)
+      delete_clusters
+      ;;
+    status)
+      show_status
+      ;;
+    metrics)
+      local metrics_cmd="${2:-}"
+      case "${metrics_cmd}" in
+        install)
+          install_metrics_server
+          ;;
+        uninstall)
+          uninstall_metrics_server
+          ;;
+        *)
+          log_error "Unknown metrics command: ${metrics_cmd}"
+          echo "Usage: $0 metrics [install|uninstall]"
+          exit 1
+          ;;
+      esac
+      ;;
+    help|--help|-h)
+      show_usage
+      ;;
+    "")
+      log_error "No command specified"
+      show_usage
+      exit 1
+      ;;
+    *)
+      log_error "Unknown command: ${command}"
+      show_usage
+      exit 1
+      ;;
+  esac
+}
+
+# Run main function
+main "$@"
