@@ -81,6 +81,7 @@ servers:
     configBlock: |-
       lameduck 5s
   - name: any
+  - name: loadbalance
   - name: etcd
     configBlock: |-
       path /skydns

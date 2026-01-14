@@ -1,0 +1,63 @@
+# IMPORTANT: Allow legacy Bitnami images
+# Required when using bitnamilegacy repository
+global:
+  security:
+    allowInsecureImages: true
+
+auth:
+  rbac:
+    enabled: false
+    create: false
+    allowNoneAuthentication: true
+    rootPassword: Pa55w()rd
+  token:
+    enabled: false
+  client:
+    enableAuthentication: true
+    useAutoTLS: false
+    secureTransport: true
+    existingSecret: etcd-main-tls
+    certFilename: tls.crt
+    certKeyFilename: tls.key
+    caFilename: ca.crt
+  peer:
+    enableAuthentication: true
+    useAutoTLS: true
+    secureTransport: true
+    existingSecret: etcd-main-tls
+    certFilename: tls.crt
+    certKeyFilename: tls.key
+    caFilename: ca.crt
+
+# Image configuration - using legacy Bitnami images
+# WARNING: These images receive no updates or support and should only be used temporarily
+image:
+  registry: docker.io
+  repository: bitnamilegacy/etcd
+  tag: 3.5.17-debian-12-r4
+
+replicaCount: 3
+logLevel: info
+
+metrics:
+  enabled: false
+  useSeparateEndpoint: true
+
+podLabels:
+  app: coredns-etcd
+
+commonLabels:
+  "coredns-agent-auto": "enabled"
+  "coredns-agent-ttl": "10"
+
+# Uncomment for production use with anti-affinity
+# affinity:
+#   podAntiAffinity:
+#     requiredDuringSchedulingIgnoredDuringExecution:
+#     - labelSelector:
+#         matchExpressions:
+#         - key: app
+#           operator: In
+#           values:
+#           - coredns-etcd
+#       topologyKey: kubernetes.io/hostname
