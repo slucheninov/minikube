@@ -1,0 +1,124 @@
+# Пример использования нативных sidecar контейнеров в Kubernetes 1.33+
+# Нативные sidecar позволяют запускать вспомогательные контейнеры параллельно
+# с основными, не блокируя завершение Job после выполнения основной задачи
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-processor-job
+spec:
+  # Количество попыток перезапуска при неудаче
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: data-processor
+    spec:
+      # Для Job допустимы только Never или OnFailure
+      # Sidecar с restartPolicy: Always не влияет на это правило
+      restartPolicy: Never
+      
+      # Общий volume для обмена данными между основным контейнером и sidecar
+      volumes:
+      - name: shared-data
+        emptyDir: {}
+
+      # Нативный sidecar контейнер (Kubernetes 1.33+)
+      # В K8s 1.33+ initContainer с restartPolicy: Always становится sidecar:
+      # - Запускается перед основными контейнерами
+      # - Работает параллельно с ними
+      # - Не блокирует завершение Job после завершения основного контейнера
+      # - Автоматически завершается после завершения всех основных контейнеров
+      initContainers:
+      - name: progress-monitor
+        image: busybox:1.36
+        # Ключевое поле для нативных sidecar в K8s 1.33+
+        # Без этого поля initContainer будет блокировать запуск основных контейнеров
+        restartPolicy: Always
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Progress monitor started"
+          # Флаг для корректного завершения при получении сигнала
+          RUNNING=1
+          
+          # Обработка SIGTERM для graceful shutdown
+          # SIGKILL нельзя обработать - он всегда убивает процесс немедленно
+          cleanup() {
+            echo "Received SIGTERM, shutting down gracefully..."
+            RUNNING=0
+            if [ -f /data/progress.txt ]; then
+              echo "=== Final progress ==="
+              cat /data/progress.txt
+              echo "======================"
+            fi
+            echo "Progress monitor stopped"
+            exit 0
+          }
+          
+          # Устанавливаем обработчик сигнала SIGTERM
+          trap cleanup TERM
+          
+          # Мониторинг файла прогресса в бесконечном цикле
+          # Sidecar будет работать до завершения основного контейнера
+          while [ "$RUNNING" = "1" ]; do
+            if [ -f /data/progress.txt ]; then
+              echo "=== Current progress ==="
+              cat /data/progress.txt
+              echo "======================="
+            fi
+            # Используем sleep с проверкой флага для более быстрой реакции на сигнал
+            sleep 2 || break
+          done
+          
+          # Финальная проверка при выходе из цикла
+          cleanup
+        volumeMounts:
+        - name: shared-data
+          mountPath: /data
+
+      # Основной контейнер Job - выполняет основную задачу
+      # После его завершения Job считается успешно выполненным,
+      # даже если sidecar контейнер все еще работает
+      containers:
+      - name: data-processor
+        image: python:3.11-alpine
+        command:
+        - /bin/sh
+        - -c
+        - |
+          # Создаем скрипт обработки данных
+          cat > /process.py <<'EOF'
+          import time
+          import random
+          
+          print("Starting data processing job...")
+          total_items = 10
+          
+          # Обрабатываем элементы и записываем прогресс
+          for i in range(1, total_items + 1):
+              # Симулируем обработку данных
+              time.sleep(random.uniform(1, 3))
+              
+              progress = f"Processed {i}/{total_items} items ({i*10}%)"
+              print(progress)
+              
+              # Записываем прогресс в общий файл для sidecar контейнера
+              # Sidecar будет читать этот файл и выводить прогресс
+              with open('/data/progress.txt', 'w') as f:
+                  f.write(f"{progress}\n")
+                  f.write(f"Last update: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+          
+          print("Job completed successfully!")
+          # Финальный статус для sidecar
+          with open('/data/progress.txt', 'w') as f:
+              f.write("Status: COMPLETED\n")
+              f.write(f"Finished at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+          EOF
+          
+          # Запускаем обработку данных
+          python /process.py
+        # Монтируем тот же volume, что и sidecar, для обмена данными
+        volumeMounts:
+        - name: shared-data
+          mountPath: /data
