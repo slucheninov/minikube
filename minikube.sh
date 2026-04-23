@@ -20,6 +20,8 @@
 #   SERVICE_CIDR      - Service cluster IP range (default: auto)
 #   METRICS_SERVER    - Install metrics-server: true/false (default: false)
 #   METRICS_VERSION   - Metrics-server Helm chart version (default: 3.11.0)
+#   REGISTRY          - Enable in-cluster registry addon: true/false (default: false)
+#   INSECURE_REGISTRIES - Comma-separated list of insecure registries to trust (default: empty)
 #
 
 set -euo pipefail
@@ -33,6 +35,8 @@ readonly DEFAULT_METRICS_VERSION="3.11.0"
 readonly METRICS_NAMESPACE="kube-system"
 readonly METRICS_NAME="metrics-server"
 readonly METRICS_REPO="https://kubernetes-sigs.github.io/metrics-server/"
+readonly DEFAULT_REGISTRY="false"
+readonly DEFAULT_INSECURE_REGISTRIES=""
 readonly SCRIPT_DIR="$(cd "$(dirname "${(%):-%x}")" && pwd)"
 readonly SCRIPT_NAME="$(basename "${(%):-%x}")"
 
@@ -42,6 +46,8 @@ K8S_VERSION="${K8S_VERSION:-${DEFAULT_K8S_VERSION}}"
 CNI="${CNI:-${DEFAULT_CNI}}"
 METRICS_SERVER="${METRICS_SERVER:-${DEFAULT_METRICS_SERVER}}"
 METRICS_VERSION="${METRICS_VERSION:-${DEFAULT_METRICS_VERSION}}"
+REGISTRY="${REGISTRY:-${DEFAULT_REGISTRY}}"
+INSECURE_REGISTRIES="${INSECURE_REGISTRIES:-${DEFAULT_INSECURE_REGISTRIES}}"
 
 # Service CIDR mapping for multi-cluster setups
 typeset -A SERVICE_CIDR_MAP
@@ -210,8 +216,27 @@ build_start_command() {
   if [[ -n "${service_cidr}" ]]; then
     cmd="${cmd} --service-cluster-ip-range=${service_cidr}"
   fi
-  
+
+  if [[ -n "${INSECURE_REGISTRIES}" ]]; then
+    cmd="${cmd} --insecure-registry=${INSECURE_REGISTRIES}"
+  fi
+
   echo "${cmd}"
+}
+
+# Enable the built-in minikube registry addon for a cluster
+enable_registry_addon() {
+  local cluster=$1
+  log_info "Enabling registry addon on ${cluster}..."
+  minikube addons enable registry -p "${cluster}"
+}
+
+# Disable the built-in minikube registry addon for a cluster
+disable_registry_addon() {
+  local cluster=$1
+  log_info "Disabling registry addon on ${cluster}..."
+  minikube addons disable registry -p "${cluster}" 2>/dev/null || \
+    log_warn "registry addon not enabled on ${cluster}"
 }
 
 # Start cluster(s)
@@ -222,15 +247,21 @@ start_clusters() {
   log_info "  Kubernetes version: ${K8S_VERSION}"
   log_info "  CNI: ${CNI:-default}"
   log_info "  Metrics-server: ${METRICS_SERVER}"
-  
+  log_info "  Registry addon: ${REGISTRY}"
+  log_info "  Insecure registries: ${INSECURE_REGISTRIES:-none}"
+
   local cluster_array=("${(@s:,:)CLUSTERS}")
-  
+
   for cluster in "${cluster_array[@]}"; do
     log_info "Starting cluster: ${cluster}"
     local cmd=$(build_start_command "${cluster}")
     eval "${cmd}"
+
+    if [[ "${REGISTRY}" == "true" ]]; then
+      enable_registry_addon "${cluster}"
+    fi
   done
-  
+
   # Install metrics-server if enabled
   if [[ "${METRICS_SERVER}" == "true" ]]; then
     log_info "Installing metrics-server..."
@@ -359,15 +390,20 @@ Commands:
   status             Show cluster status
   metrics install    Install metrics-server
   metrics uninstall  Uninstall metrics-server
+  registry install   Enable in-cluster registry addon
+  registry uninstall Disable in-cluster registry addon
+  registry port      Show host:port to reach the in-cluster registry
   help               Show this help message
 
 Environment Variables:
-  CLUSTERS           Comma-separated list of cluster names (default: cluster-1)
-  K8S_VERSION        Kubernetes version (default: 1.33.6)
-  CNI                CNI plugin: cilium, calico, or empty for default (default: empty)
-  SERVICE_CIDR       Service cluster IP range (default: auto-assigned)
-  METRICS_SERVER     Install metrics-server on start: true/false (default: false)
-  METRICS_VERSION    Metrics-server Helm chart version (default: 3.11.0)
+  CLUSTERS            Comma-separated list of cluster names (default: cluster-1)
+  K8S_VERSION         Kubernetes version (default: 1.33.6)
+  CNI                 CNI plugin: cilium, calico, or empty for default (default: empty)
+  SERVICE_CIDR        Service cluster IP range (default: auto-assigned)
+  METRICS_SERVER      Install metrics-server on start: true/false (default: false)
+  METRICS_VERSION     Metrics-server Helm chart version (default: 3.11.0)
+  REGISTRY            Enable in-cluster registry addon on start: true/false (default: false)
+  INSECURE_REGISTRIES Comma-separated insecure registries to trust, e.g. host:5000 (default: empty)
 
 Examples:
   # Start single cluster
@@ -381,6 +417,19 @@ Examples:
 
   # Install metrics-server separately
   ${SCRIPT_NAME} metrics install
+
+  # Start cluster with the in-cluster registry addon
+  REGISTRY=true ${SCRIPT_NAME} start
+
+  # Start cluster that trusts an external insecure registry
+  INSECURE_REGISTRIES="192.168.49.2:5000,my-registry.lan:5000" ${SCRIPT_NAME} start
+
+  # Enable/disable registry addon on an already running cluster
+  ${SCRIPT_NAME} registry install
+  ${SCRIPT_NAME} registry uninstall
+
+  # Print the host:port for the in-cluster registry
+  ${SCRIPT_NAME} registry port
 
   # Show cluster status
   ${SCRIPT_NAME} status
@@ -399,7 +448,7 @@ main() {
 
   # Commands that actually require minikube binary
   case "${command}" in
-    start|stop|delete|status|metrics)
+    start|stop|delete|status|metrics|registry)
       check_minikube_installed
       ;;
   esac
@@ -429,6 +478,38 @@ main() {
         *)
           log_error "Unknown metrics command: ${metrics_cmd}"
           echo "Usage: $0 metrics [install|uninstall]"
+          exit 1
+          ;;
+      esac
+      ;;
+    registry)
+      local registry_cmd="${2:-}"
+      local cluster_array=("${(@s:,:)CLUSTERS}")
+      case "${registry_cmd}" in
+        install)
+          for cluster in "${cluster_array[@]}"; do
+            enable_registry_addon "${cluster}"
+          done
+          ;;
+        uninstall)
+          for cluster in "${cluster_array[@]}"; do
+            disable_registry_addon "${cluster}"
+          done
+          ;;
+        port)
+          for cluster in "${cluster_array[@]}"; do
+            local ip
+            ip="$(minikube ip -p "${cluster}" 2>/dev/null || true)"
+            if [[ -n "${ip}" ]]; then
+              echo "${cluster}: ${ip}:5000"
+            else
+              log_warn "${cluster}: not running"
+            fi
+          done
+          ;;
+        *)
+          log_error "Unknown registry command: ${registry_cmd}"
+          echo "Usage: $0 registry [install|uninstall|port]"
           exit 1
           ;;
       esac

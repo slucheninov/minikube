@@ -8,6 +8,7 @@ This repository provides tools and scripts for managing Minikube Kubernetes clus
 - **Flexible configuration** - Environment-based configuration
 - **CNI support** - Support for Cilium, Calico, and default CNI plugins
 - **Metrics Server integration** - Optional automatic installation of metrics-server
+- **Image registry** - Optional in-cluster registry addon and support for trusting external insecure registries
 - **Helm charts** - Pre-configured Helm charts for common services
 
 ## Prerequisites
@@ -65,6 +66,19 @@ METRICS_SERVER=true ./minikube.sh start
 ./minikube.sh metrics uninstall
 ```
 
+### Registry Management
+
+```bash
+# Enable the built-in minikube registry addon on the cluster(s) in $CLUSTERS
+./minikube.sh registry install
+
+# Disable it
+./minikube.sh registry uninstall
+
+# Print host:port of the in-cluster registry (node IP + 5000)
+./minikube.sh registry port
+```
+
 ## Configuration
 
 The script uses environment variables for configuration. All variables are optional and have sensible defaults.
@@ -79,6 +93,8 @@ The script uses environment variables for configuration. All variables are optio
 | `SERVICE_CIDR` | (auto) | Service cluster IP range (auto-assigned for known clusters) |
 | `METRICS_SERVER` | `false` | Install metrics-server on start: `true` or `false` |
 | `METRICS_VERSION` | `3.11.0` | Metrics-server Helm chart version |
+| `REGISTRY` | `false` | Enable in-cluster `registry` addon on start: `true` or `false` |
+| `INSECURE_REGISTRIES` | (empty) | Comma-separated list of registries the node should trust over plain HTTP (passed to `minikube start --insecure-registry`) |
 
 ### Service CIDR Mapping
 
@@ -124,6 +140,19 @@ CNI=cilium \
 K8S_VERSION=1.33.6 \
 METRICS_SERVER=true \
 ./minikube.sh start
+```
+
+### Example 6: Cluster with In-Cluster Registry
+
+```bash
+REGISTRY=true ./minikube.sh start
+./minikube.sh registry port
+```
+
+### Example 7: Cluster Trusting an External Insecure Registry
+
+```bash
+INSECURE_REGISTRIES="my-registry.lan:5000" ./minikube.sh start
 ```
 
 ## Switching Between Clusters
@@ -210,6 +239,149 @@ kubectl run -it --rm --restart=Never busybox \
 # Or use Alpine
 kubectl run -it --rm --restart=Never busybox \
   --image=alpine:3.18 sh
+```
+
+## Image Registry
+
+Minikube ships a built-in registry addon that runs an in-cluster Docker registry on port `5000`. This script exposes it via the `REGISTRY` env var and the `registry` subcommand. You can also use `INSECURE_REGISTRIES` to tell the node's container runtime to trust external plain-HTTP registries.
+
+### Option 1: In-cluster registry addon
+
+Run a registry inside the cluster and push images to it.
+
+```bash
+# Start the cluster with the registry addon enabled
+REGISTRY=true ./minikube.sh start
+
+# Or enable it later on an already running cluster
+./minikube.sh registry install
+
+# Find out the host:port to push to (node IP + 5000)
+./minikube.sh registry port
+# -> cluster-1: 192.168.49.2:5000
+```
+
+#### Pushing an image to the in-cluster registry
+
+There are three common ways to get an image into the registry. Pick the one that matches your driver/OS.
+
+##### Way A — `minikube image load` (simplest, any OS/driver)
+
+Loads an image straight from your host's Docker into the cluster's container runtime. The registry addon isn't strictly required for this, but the image becomes immediately pullable by Pods on that node.
+
+```bash
+# Build locally
+docker build -t my-app:dev .
+
+# Push the image into the node
+minikube image load my-app:dev -p cluster-1
+
+# Verify it's on the node
+minikube image ls -p cluster-1 | grep my-app
+
+# Reference it in a Pod with imagePullPolicy: IfNotPresent
+kubectl run my-app --image=my-app:dev --image-pull-policy=IfNotPresent
+```
+
+##### Way B — build directly inside minikube's Docker daemon
+
+`docker build` runs against the node's daemon, so the image lands there without a push. Handy on macOS/Windows where the node IP is not routable from the host.
+
+```bash
+# Point your local docker CLI at minikube's daemon for this shell
+eval $(minikube -p cluster-1 docker-env)
+
+# Build — image is stored directly on the node
+docker build -t my-app:dev .
+
+# Use in a Pod
+kubectl run my-app --image=my-app:dev --image-pull-policy=IfNotPresent
+
+# Reset when done
+eval $(minikube -p cluster-1 docker-env -u)
+```
+
+##### Way C — `docker push` to the registry addon
+
+Use this when you want a real push flow (CI, Skaffold, Tilt, etc.) against `host:5000`.
+
+**Linux (the node IP is routable from the host):**
+
+```bash
+# 1. Get the host:port
+REG_HOST="$(minikube ip -p cluster-1):5000"
+
+# 2. Tell your local Docker to treat it as insecure (HTTP).
+#    Edit /etc/docker/daemon.json once:
+#    { "insecure-registries": ["192.168.49.2:5000"] }
+#    then: sudo systemctl restart docker
+
+# 3. Tag and push
+docker tag my-app:dev "${REG_HOST}/my-app:dev"
+docker push "${REG_HOST}/my-app:dev"
+
+# 4. Reference in a Pod using the same host:port
+kubectl run my-app --image="${REG_HOST}/my-app:dev"
+```
+
+**macOS / Windows (Docker driver, node IP not routable):** port-forward the registry Service to `localhost:5000` and push there.
+
+```bash
+# 1. Expose the in-cluster registry on localhost:5000
+kubectl -n kube-system port-forward svc/registry 5000:80 &
+
+# 2. On Docker Desktop add "localhost:5000" to
+#    Settings -> Docker Engine -> insecure-registries, then Apply & Restart.
+
+# 3. Push
+docker tag my-app:dev localhost:5000/my-app:dev
+docker push localhost:5000/my-app:dev
+
+# 4. The node itself reaches the registry via its ClusterIP Service,
+#    so reference the image from a Pod as <node-ip>:5000/...
+REG_HOST="$(minikube ip -p cluster-1):5000"
+kubectl run my-app --image="${REG_HOST}/my-app:dev"
+```
+
+> The in-cluster registry speaks plain HTTP. The node's container runtime already trusts it (the addon wires that up), but your **host** Docker does not — that's why Way C needs an `insecure-registries` entry on the host. Ways A and B avoid that step entirely.
+
+#### Quick smoke test
+
+```bash
+# End-to-end: build -> load -> run
+docker build -t hello:dev -<<'DOCKER'
+FROM nginx:alpine
+RUN echo "hello from minikube registry" > /usr/share/nginx/html/index.html
+DOCKER
+
+minikube image load hello:dev -p cluster-1
+kubectl run hello --image=hello:dev --image-pull-policy=IfNotPresent --port=80
+kubectl wait --for=condition=Ready pod/hello --timeout=60s
+kubectl port-forward pod/hello 8080:80 &
+curl -s http://localhost:8080
+```
+
+### Option 2: Trust an external insecure registry
+
+If you run a registry outside the cluster over plain HTTP (e.g. a lab registry on your LAN), pass it via `INSECURE_REGISTRIES` so the node's container runtime doesn't reject it.
+
+```bash
+# Single registry
+INSECURE_REGISTRIES="my-registry.lan:5000" ./minikube.sh start
+
+# Multiple (comma-separated)
+INSECURE_REGISTRIES="my-registry.lan:5000,10.0.0.5:5000" ./minikube.sh start
+```
+
+This maps to `minikube start --insecure-registry=...`. Note that insecure-registry settings are baked into the node at creation time: changing `INSECURE_REGISTRIES` requires `delete` + `start` for that cluster, a simple `stop`/`start` is not enough.
+
+### Combining both
+
+```bash
+REGISTRY=true \
+INSECURE_REGISTRIES="192.168.49.2:5000" \
+CLUSTERS="cluster-1,cluster-2" \
+./minikube.sh start
 ```
 
 ## GCP Authentication (Optional)
