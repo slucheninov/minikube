@@ -68,6 +68,123 @@ log_error() {
   echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
+# Check that minikube is installed; otherwise suggest the official install method
+check_minikube_installed() {
+  if command -v minikube >/dev/null 2>&1; then
+    return 0
+  fi
+
+  log_error "minikube is not installed or not found in PATH."
+  echo
+  echo "Install minikube using the method recommended by the official documentation:"
+  echo "  https://minikube.sigs.k8s.io/docs/start/"
+  echo
+
+  local os_name
+  os_name="$(uname -s)"
+  local arch
+  arch="$(uname -m)"
+
+  case "${os_name}" in
+    Darwin)
+      echo "macOS (${arch}):"
+      if command -v brew >/dev/null 2>&1; then
+        echo "  brew install minikube"
+      else
+        echo "  # Homebrew not detected; install it from https://brew.sh or use the binary below"
+      fi
+      if [[ "${arch}" == "arm64" ]]; then
+        echo "  # Or install the binary directly:"
+        echo "  curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-darwin-arm64"
+        echo "  sudo install minikube-darwin-arm64 /usr/local/bin/minikube && rm minikube-darwin-arm64"
+      else
+        echo "  # Or install the binary directly:"
+        echo "  curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-darwin-amd64"
+        echo "  sudo install minikube-darwin-amd64 /usr/local/bin/minikube && rm minikube-darwin-amd64"
+      fi
+      ;;
+    Linux)
+      echo "Linux (${arch}):"
+      if [[ "${arch}" == "aarch64" || "${arch}" == "arm64" ]]; then
+        echo "  curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-arm64"
+        echo "  sudo install minikube-linux-arm64 /usr/local/bin/minikube && rm minikube-linux-arm64"
+      else
+        echo "  curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64"
+        echo "  sudo install minikube-linux-amd64 /usr/local/bin/minikube && rm minikube-linux-amd64"
+      fi
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      echo "Windows:"
+      echo "  winget install Kubernetes.minikube"
+      echo "  # or: choco install minikube"
+      ;;
+    *)
+      echo "Unsupported OS: ${os_name}. See https://minikube.sigs.k8s.io/docs/start/"
+      ;;
+  esac
+
+  echo
+  read -q "REPLY?Attempt automatic installation now? (y/N): " || true
+  echo
+
+  if [[ "${REPLY}" =~ ^[Yy]$ ]]; then
+    install_minikube_auto "${os_name}" "${arch}" || {
+      log_error "Automatic installation failed. Please install minikube manually."
+      exit 1
+    }
+    if ! command -v minikube >/dev/null 2>&1; then
+      log_error "minikube still not found in PATH after installation."
+      exit 1
+    fi
+    log_info "minikube installed: $(minikube version --short 2>/dev/null || minikube version | head -n1)"
+  else
+    log_info "Please install minikube and re-run this script."
+    exit 1
+  fi
+}
+
+# Attempt automatic installation based on OS
+install_minikube_auto() {
+  local os_name="$1"
+  local arch="$2"
+
+  case "${os_name}" in
+    Darwin)
+      if command -v brew >/dev/null 2>&1; then
+        log_info "Installing minikube via Homebrew..."
+        brew install minikube
+      else
+        local bin
+        if [[ "${arch}" == "arm64" ]]; then
+          bin="minikube-darwin-arm64"
+        else
+          bin="minikube-darwin-amd64"
+        fi
+        log_info "Downloading ${bin}..."
+        curl -LO "https://storage.googleapis.com/minikube/releases/latest/${bin}"
+        sudo install "${bin}" /usr/local/bin/minikube
+        rm -f "${bin}"
+      fi
+      ;;
+    Linux)
+      local bin
+      if [[ "${arch}" == "aarch64" || "${arch}" == "arm64" ]]; then
+        bin="minikube-linux-arm64"
+      else
+        bin="minikube-linux-amd64"
+      fi
+      log_info "Downloading ${bin}..."
+      curl -LO "https://storage.googleapis.com/minikube/releases/latest/${bin}"
+      sudo install "${bin}" /usr/local/bin/minikube
+      rm -f "${bin}"
+      ;;
+    *)
+      log_error "Automatic installation is not supported on ${os_name}."
+      return 1
+      ;;
+  esac
+}
+
 # Get service CIDR for a cluster
 get_service_cidr() {
   local cluster=$1
@@ -279,7 +396,14 @@ EOF
 # Main command handler
 main() {
   local command="${1:-}"
-  
+
+  # Commands that actually require minikube binary
+  case "${command}" in
+    start|stop|delete|status|metrics)
+      check_minikube_installed
+      ;;
+  esac
+
   case "${command}" in
     start)
       start_clusters
