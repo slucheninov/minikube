@@ -149,6 +149,93 @@ check_minikube_installed() {
   fi
 }
 
+# Check that helm is installed; otherwise suggest the official install method
+check_helm_installed() {
+  if command -v helm >/dev/null 2>&1; then
+    return 0
+  fi
+
+  log_error "helm is not installed or not found in PATH."
+  echo
+  echo "Install helm using the method recommended by the official documentation:"
+  echo "  https://helm.sh/docs/intro/install/"
+  echo
+
+  local os_name
+  os_name="$(uname -s)"
+  local arch
+  arch="$(uname -m)"
+
+  case "${os_name}" in
+    Darwin)
+      echo "macOS (${arch}):"
+      if command -v brew >/dev/null 2>&1; then
+        echo "  brew install helm"
+      else
+        echo "  # Homebrew not detected; install it from https://brew.sh or use the installer below"
+      fi
+      echo "  # Or via the official installer script:"
+      echo "  curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"
+      ;;
+    Linux)
+      echo "Linux (${arch}):"
+      echo "  curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      echo "Windows:"
+      echo "  winget install Helm.Helm"
+      echo "  # or: choco install kubernetes-helm"
+      ;;
+    *)
+      echo "Unsupported OS: ${os_name}. See https://helm.sh/docs/intro/install/"
+      ;;
+  esac
+
+  echo
+  read -q "REPLY?Attempt automatic installation now? (y/N): " || true
+  echo
+
+  if [[ "${REPLY}" =~ ^[Yy]$ ]]; then
+    install_helm_auto "${os_name}" || {
+      log_error "Automatic installation failed. Please install helm manually."
+      exit 1
+    }
+    if ! command -v helm >/dev/null 2>&1; then
+      log_error "helm still not found in PATH after installation."
+      exit 1
+    fi
+    log_info "helm installed: $(helm version --short 2>/dev/null || helm version | head -n1)"
+  else
+    log_info "Please install helm and re-run this script."
+    exit 1
+  fi
+}
+
+# Attempt automatic helm installation based on OS
+install_helm_auto() {
+  local os_name="$1"
+
+  case "${os_name}" in
+    Darwin)
+      if command -v brew >/dev/null 2>&1; then
+        log_info "Installing helm via Homebrew..."
+        brew install helm
+      else
+        log_info "Installing helm via the official installer script..."
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      fi
+      ;;
+    Linux)
+      log_info "Installing helm via the official installer script..."
+      curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      ;;
+    *)
+      log_error "Automatic installation is not supported on ${os_name}."
+      return 1
+      ;;
+  esac
+}
+
 # Attempt automatic installation based on OS
 install_minikube_auto() {
   local os_name="$1"
@@ -450,6 +537,18 @@ main() {
   case "${command}" in
     start|stop|delete|status|metrics|registry)
       check_minikube_installed
+      ;;
+  esac
+
+  # Commands that require helm binary (metrics-server uses Helm)
+  case "${command}" in
+    metrics)
+      check_helm_installed
+      ;;
+    start)
+      if [[ "${METRICS_SERVER}" == "true" ]]; then
+        check_helm_installed
+      fi
       ;;
   esac
 
