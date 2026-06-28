@@ -28,7 +28,7 @@ set -euo pipefail
 
 # Default configuration
 readonly DEFAULT_CLUSTERS="cluster-1"
-readonly DEFAULT_K8S_VERSION="1.33.10"
+readonly DEFAULT_K8S_VERSION="1.34.0"
 readonly DEFAULT_CNI=""
 readonly DEFAULT_METRICS_SERVER="false"
 readonly DEFAULT_METRICS_VERSION="3.11.0"
