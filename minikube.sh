@@ -11,12 +11,13 @@
 #   stop        - Stop cluster(s)
 #   delete      - Delete cluster(s)
 #   status      - Show cluster status
+#   updates     - Check stable Minikube and Kubernetes releases
 #   metrics     - Install/uninstall metrics-server
 #   registry    - Enable/disable in-cluster registry addon, show its host:port
 #
 # Environment variables:
 #   CLUSTERS          - Comma-separated list of cluster names (default: cluster-1)
-#   K8S_VERSION       - Kubernetes version (default: 1.34.8)
+#   K8S_VERSION       - Kubernetes version (default: 1.35.9)
 #   CNI               - CNI plugin: cilium, calico, or none (default: none)
 #   SERVICE_CIDR      - Service cluster IP range (default: auto)
 #   METRICS_SERVER    - Install metrics-server: true/false (default: false)
@@ -29,7 +30,7 @@ set -euo pipefail
 
 # Default configuration
 readonly DEFAULT_CLUSTERS="cluster-1"
-readonly DEFAULT_K8S_VERSION="1.34.8"
+readonly DEFAULT_K8S_VERSION="1.35.9"
 readonly DEFAULT_CNI=""
 readonly DEFAULT_METRICS_SERVER="false"
 readonly DEFAULT_METRICS_VERSION="3.11.0"
@@ -38,7 +39,6 @@ readonly METRICS_NAME="metrics-server"
 readonly METRICS_REPO="https://kubernetes-sigs.github.io/metrics-server/"
 readonly DEFAULT_REGISTRY="false"
 readonly DEFAULT_INSECURE_REGISTRIES=""
-readonly SCRIPT_DIR="$(cd "$(dirname "${(%):-%x}")" && pwd)"
 readonly SCRIPT_NAME="$(basename "${(%):-%x}")"
 
 # Configuration from environment or defaults
@@ -76,190 +76,59 @@ log_error() {
   echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
-# Print OS-specific minikube install hints
-print_minikube_install_hints() {
-  local os_name="$1"
-  local arch="$2"
-
-  case "${os_name}" in
-    Darwin)
-      echo "macOS (${arch}):"
-      if command -v brew >/dev/null 2>&1; then
-        echo "  brew install minikube"
-      else
-        echo "  # Homebrew not detected; install it from https://brew.sh or use the binary below"
-      fi
-      if [[ "${arch}" == "arm64" ]]; then
-        echo "  # Or install the binary directly:"
-        echo "  curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-darwin-arm64"
-        echo "  sudo install minikube-darwin-arm64 /usr/local/bin/minikube && rm minikube-darwin-arm64"
-      else
-        echo "  # Or install the binary directly:"
-        echo "  curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-darwin-amd64"
-        echo "  sudo install minikube-darwin-amd64 /usr/local/bin/minikube && rm minikube-darwin-amd64"
-      fi
-      ;;
-    Linux)
-      echo "Linux (${arch}):"
-      if [[ "${arch}" == "aarch64" || "${arch}" == "arm64" ]]; then
-        echo "  curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-arm64"
-        echo "  sudo install minikube-linux-arm64 /usr/local/bin/minikube && rm minikube-linux-arm64"
-      else
-        echo "  curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64"
-        echo "  sudo install minikube-linux-amd64 /usr/local/bin/minikube && rm minikube-linux-amd64"
-      fi
-      ;;
-    MINGW*|MSYS*|CYGWIN*)
-      echo "Windows:"
-      echo "  winget install Kubernetes.minikube"
-      echo "  # or: choco install minikube"
-      ;;
-    *)
-      echo "Unsupported OS: ${os_name}. See https://minikube.sigs.k8s.io/docs/start/"
-      ;;
-  esac
-}
-
-# Print OS-specific helm install hints
-print_helm_install_hints() {
-  local os_name="$1"
-  local arch="$2"
-
-  case "${os_name}" in
-    Darwin)
-      echo "macOS (${arch}):"
-      if command -v brew >/dev/null 2>&1; then
-        echo "  brew install helm"
-      else
-        echo "  # Homebrew not detected; install it from https://brew.sh or use the installer below"
-      fi
-      echo "  # Or via the official installer script:"
-      echo "  curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"
-      ;;
-    Linux)
-      echo "Linux (${arch}):"
-      echo "  curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"
-      ;;
-    MINGW*|MSYS*|CYGWIN*)
-      echo "Windows:"
-      echo "  winget install Helm.Helm"
-      echo "  # or: choco install kubernetes-helm"
-      ;;
-    *)
-      echo "Unsupported OS: ${os_name}. See https://helm.sh/docs/intro/install/"
-      ;;
-  esac
-}
-
-# Check that a tool (minikube or helm) is installed; otherwise suggest the
-# official install method and offer automatic installation
+# Keep installation separate from cluster operations. Only a local package
+# manager is automated; never execute an unpinned downloaded installer.
 ensure_installed() {
-  local tool="$1"
-  local docs_url="$2"
-
-  if command -v "${tool}" >/dev/null 2>&1; then
-    return 0
+  local tool="$1" docs_url="$2"
+  command -v "${tool}" >/dev/null 2>&1 && return 0
+  log_error "${tool} is not installed. Installation guide: ${docs_url}"
+  if [[ -t 0 ]] && command -v brew >/dev/null 2>&1; then
+    local REPLY=""
+    read -q "REPLY?Install ${tool} with Homebrew? (y/N): " || true
+    echo
+    if [[ "${REPLY}" =~ ^[Yy]$ ]]; then
+      brew install "${tool}" || return 1
+      command -v "${tool}" >/dev/null 2>&1 && return 0
+    fi
   fi
-
-  log_error "${tool} is not installed or not found in PATH."
-  echo
-  echo "Install ${tool} using the method recommended by the official documentation:"
-  echo "  ${docs_url}"
-  echo
-
-  local os_name
-  os_name="$(uname -s)"
-  local arch
-  arch="$(uname -m)"
-
-  "print_${tool}_install_hints" "${os_name}" "${arch}"
-
-  echo
-  local REPLY=""
-  read -q "REPLY?Attempt automatic installation now? (y/N): " || true
-  echo
-
-  if [[ ! "${REPLY}" =~ ^[Yy]$ ]]; then
-    log_info "Please install ${tool} and re-run this script."
-    exit 1
-  fi
-
-  "install_${tool}_auto" "${os_name}" "${arch}" || {
-    log_error "Automatic installation failed. Please install ${tool} manually."
-    exit 1
-  }
-  if ! command -v "${tool}" >/dev/null 2>&1; then
-    log_error "${tool} still not found in PATH after installation."
-    exit 1
-  fi
-  log_info "${tool} installed: $("${tool}" version --short 2>/dev/null || "${tool}" version | head -n1)"
+  return 1
 }
 
-# Attempt automatic helm installation based on OS
-install_helm_auto() {
-  local os_name="$1"
-
-  case "${os_name}" in
-    Darwin)
-      if command -v brew >/dev/null 2>&1; then
-        log_info "Installing helm via Homebrew..."
-        brew install helm
-      else
-        log_info "Installing helm via the official installer script..."
-        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-      fi
-      ;;
-    Linux)
-      log_info "Installing helm via the official installer script..."
-      curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-      ;;
-    *)
-      log_error "Automatic installation is not supported on ${os_name}."
+# Validate before invoking tools or using profile names as file paths.
+validate_configuration() {
+  local cluster flag
+  local -A seen
+  for cluster in "${CLUSTER_LIST[@]}"; do
+    if [[ ! "${cluster}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
+      log_error "Invalid cluster name: ${cluster}. Use letters, digits, underscores and hyphens, starting with a letter or digit."
       return 1
-      ;;
-  esac
+    fi
+    if [[ -n "${seen[$cluster]:-}" ]]; then
+      log_error "Duplicate cluster name: ${cluster}"
+      return 1
+    fi
+    seen[$cluster]=1
+  done
+  for flag in METRICS_SERVER REGISTRY; do
+    if [[ "${(P)flag}" != true && "${(P)flag}" != false ]]; then
+      log_error "${flag} must be true or false."
+      return 1
+    fi
+  done
 }
 
-# Attempt automatic installation based on OS
-install_minikube_auto() {
-  local os_name="$1"
-  local arch="$2"
-
-  case "${os_name}" in
-    Darwin)
-      if command -v brew >/dev/null 2>&1; then
-        log_info "Installing minikube via Homebrew..."
-        brew install minikube
-      else
-        local bin
-        if [[ "${arch}" == "arm64" ]]; then
-          bin="minikube-darwin-arm64"
-        else
-          bin="minikube-darwin-amd64"
-        fi
-        log_info "Downloading ${bin}..."
-        curl -LO "https://storage.googleapis.com/minikube/releases/latest/${bin}"
-        sudo install "${bin}" /usr/local/bin/minikube
-        rm -f "${bin}"
-      fi
-      ;;
-    Linux)
-      local bin
-      if [[ "${arch}" == "aarch64" || "${arch}" == "arm64" ]]; then
-        bin="minikube-linux-arm64"
-      else
-        bin="minikube-linux-amd64"
-      fi
-      log_info "Downloading ${bin}..."
-      curl -LO "https://storage.googleapis.com/minikube/releases/latest/${bin}"
-      sudo install "${bin}" /usr/local/bin/minikube
-      rm -f "${bin}"
-      ;;
-    *)
-      log_error "Automatic installation is not supported on ${os_name}."
-      return 1
-      ;;
-  esac
+# Try every profile, but report partial failures to callers and CI.
+run_cluster_command() {
+  local action="$1" cluster
+  local failed=0
+  for cluster in "${CLUSTER_LIST[@]}"; do
+    log_info "${action}: ${cluster}"
+    if ! minikube "${action}" -p "${cluster}"; then
+      log_error "${action} failed for ${cluster}"
+      failed=1
+    fi
+  done
+  return "${failed}"
 }
 
 # Get service CIDR for a cluster
@@ -305,8 +174,7 @@ enable_registry_addon() {
 disable_registry_addon() {
   local cluster=$1
   log_info "Disabling registry addon on ${cluster}..."
-  minikube addons disable registry -p "${cluster}" 2>/dev/null || \
-    log_warn "registry addon not enabled on ${cluster}"
+  minikube addons disable registry -p "${cluster}"
 }
 
 # Refresh the standalone kubeconfig for a started cluster.
@@ -316,7 +184,7 @@ sync_cluster_kubeconfig() {
   local config_file="${config_dir}/${cluster}"
   local temp_file
 
-  mkdir -p "${config_dir}"
+  mkdir -p -m 700 "${config_dir}"
   temp_file="$(mktemp "${config_file}.tmp.XXXXXX")"
 
   # Export only this cluster, including credentials, before replacing its file.
@@ -343,6 +211,7 @@ start_clusters() {
   log_info "  Insecure registries: ${INSECURE_REGISTRIES:-none}"
 
   local -a reply
+  local cluster
   for cluster in "${CLUSTER_LIST[@]}"; do
     log_info "Starting cluster: ${cluster}"
     build_start_args "${cluster}"
@@ -366,55 +235,31 @@ start_clusters() {
 
 # Stop cluster(s)
 stop_clusters() {
-  log_info "Stopping Minikube cluster(s)..."
-  
-  for cluster in "${CLUSTER_LIST[@]}"; do
-    log_info "Stopping cluster: ${cluster}"
-    minikube stop -p "${cluster}" || log_warn "Failed to stop ${cluster}"
-  done
-  
-  log_info "All clusters stopped!"
+  run_cluster_command stop
 }
 
 # Delete cluster(s)
 delete_clusters() {
-  log_warn "This will delete all cluster data!"
+  log_warn "This will delete all data in: ${CLUSTERS}"
   local REPLY=""
   read -q "REPLY?Are you sure? (y/N): " || true
   echo
-  
   if [[ ! "${REPLY}" =~ ^[Yy]$ ]]; then
     log_info "Cancelled."
     return
   fi
-  
-  log_info "Deleting Minikube cluster(s)..."
-  
-  for cluster in "${CLUSTER_LIST[@]}"; do
-    log_info "Deleting cluster: ${cluster}"
-    minikube delete -p "${cluster}" || log_warn "Failed to delete ${cluster}"
-  done
-  
-  log_info "All clusters deleted!"
+  run_cluster_command delete
 }
 
-# Show cluster status
 show_status() {
-  log_info "Cluster status:"
-  echo
-  
-  for cluster in "${CLUSTER_LIST[@]}"; do
-    echo "=== ${cluster} ==="
-    minikube status -p "${cluster}" 2>/dev/null || log_warn "Cluster ${cluster} is not running"
-    echo
-  done
+  run_cluster_command status
 }
 
 # Initialize metrics-server Helm repository
 init_metrics_server() {
   log_info "Initializing metrics-server Helm repository..."
-  helm repo add metrics-server "${METRICS_REPO}" 2>/dev/null || true
-  helm repo update
+  helm repo add metrics-server "${METRICS_REPO}" --force-update
+  helm repo update metrics-server
   log_info "Metrics-server repository initialized!"
 }
 
@@ -422,20 +267,17 @@ init_metrics_server() {
 install_metrics_server() {
   log_info "Installing metrics-server..."
   
-  # Initialize repo if needed
-  if ! helm repo list | grep -q metrics-server; then
-    init_metrics_server
-  fi
+  init_metrics_server
   
   # Use first cluster for metrics-server installation
   local primary_cluster="${CLUSTER_LIST[1]}"
   
-  log_info "Switching to cluster: ${primary_cluster}"
-  minikube profile "${primary_cluster}"
+  log_info "Target cluster: ${primary_cluster}"
   
   # Install with default values for Minikube compatibility
   log_info "Installing with default values (kubelet-insecure-tls for Minikube compatibility)"
   helm upgrade --install "${METRICS_NAME}" metrics-server/metrics-server \
+    --kube-context "${primary_cluster}" \
     --version "${METRICS_VERSION}" \
     --namespace "${METRICS_NAMESPACE}" \
     --create-namespace \
@@ -451,46 +293,114 @@ uninstall_metrics_server() {
   
   local primary_cluster="${CLUSTER_LIST[1]}"
   
-  log_info "Switching to cluster: ${primary_cluster}"
-  minikube profile "${primary_cluster}"
+  log_info "Target cluster: ${primary_cluster}"
   
-  helm uninstall "${METRICS_NAME}" --namespace "${METRICS_NAMESPACE}" 2>/dev/null || \
-    log_warn "Metrics-server not found or already uninstalled"
+  helm uninstall "${METRICS_NAME}" --namespace "${METRICS_NAMESPACE}" \
+    --kube-context "${primary_cluster}" --ignore-not-found
   
   log_info "Metrics-server uninstalled!"
 }
 
-# Handle `registry install|uninstall|port`
+# Handle `registry install|uninstall|port` for every profile.
 registry_command() {
-  local registry_cmd="$1"
-  case "${registry_cmd}" in
-    install)
-      for cluster in "${CLUSTER_LIST[@]}"; do
-        enable_registry_addon "${cluster}"
-      done
-      ;;
-    uninstall)
-      for cluster in "${CLUSTER_LIST[@]}"; do
-        disable_registry_addon "${cluster}"
-      done
-      ;;
-    port)
-      for cluster in "${CLUSTER_LIST[@]}"; do
-        local ip
-        ip="$(minikube ip -p "${cluster}" 2>/dev/null || true)"
-        if [[ -n "${ip}" ]]; then
-          echo "${cluster}: ${ip}:5000"
+  local registry_cmd="$1" cluster ip
+  local failed=0
+  for cluster in "${CLUSTER_LIST[@]}"; do
+    case "${registry_cmd}" in
+      install) enable_registry_addon "${cluster}" || failed=1 ;;
+      uninstall) disable_registry_addon "${cluster}" || failed=1 ;;
+      port)
+        if ip="$(minikube ip -p "${cluster}")" && [[ -n "${ip}" ]]; then
+          printf '%s: %s:5000\n' "${cluster}" "${ip}"
         else
-          log_warn "${cluster}: not running"
+          log_error "Cannot get registry address for ${cluster}"
+          failed=1
         fi
-      done
-      ;;
-    *)
-      log_error "Unknown registry command: ${registry_cmd}"
-      echo "Usage: ${SCRIPT_NAME} registry [install|uninstall|port]"
-      exit 1
-      ;;
-  esac
+        ;;
+    esac
+  done
+  return "${failed}"
+}
+
+# Only stable x.y.z versions are compared; never evaluate remote content.
+is_stable_version() {
+  [[ "$1" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+fetch_release_version() {
+  local url="$1" format="${2:-text}" value
+  value="$(curl --fail --silent --show-error --location \
+    --proto '=https' --proto-redir '=https' \
+    --connect-timeout 5 --max-time 15 "$url")" || return 1
+  if [[ "$format" == github ]]; then
+    value="$(printf '%s' "$value" | jq -er 'select(.draft == false and .prerelease == false) | .tag_name')" || return 1
+  fi
+  is_stable_version "$value" || return 1
+  printf '%s\n' "${value#v}"
+}
+
+report_release() {
+  local label="$1" current="${2#v}" latest="${3#v}"
+  if ! is_stable_version "$current"; then
+    log_warn "${label}: current version unavailable/non-stable; latest stable ${latest}"
+    return 1
+  fi
+  autoload -Uz is-at-least
+  if [[ "$current" == "$latest" ]]; then
+    log_info "${label}: ${current} (up to date)"
+  elif is-at-least "$latest" "$current"; then
+    log_info "${label}: ${current} (ahead of published stable ${latest})"
+  else
+    log_warn "UPDATE ${label}: ${current} -> ${latest}"
+  fi
+}
+
+# Explicit, read-only network check. Does not access any Kubernetes context.
+check_updates() {
+  local tool current latest branch
+  local failed=0
+  for tool in curl jq; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      log_error "${tool} is required for updates."
+      return 1
+    fi
+  done
+
+  current=""
+  if command -v minikube >/dev/null 2>&1; then
+    current="$(minikube version --short)" || failed=1
+  fi
+  if latest="$(fetch_release_version https://api.github.com/repos/kubernetes/minikube/releases/latest github)"; then
+    report_release "Minikube (installed)" "$current" "$latest" || failed=1
+    log_info "Minikube release: https://github.com/kubernetes/minikube/releases/tag/v${latest}"
+  else
+    log_warn "Minikube: check unavailable (network, API limit or invalid response)."
+    failed=1
+  fi
+
+  current="${K8S_VERSION#v}"
+  log_info "Kubernetes configured for start: ${K8S_VERSION} (repository default: ${DEFAULT_K8S_VERSION})"
+  if is_stable_version "$current"; then
+    branch="${current%.*}"
+    if latest="$(fetch_release_version "https://dl.k8s.io/release/stable-${branch}.txt")" && [[ "${latest%.*}" == "$branch" ]]; then
+      report_release "Kubernetes ${branch} patch" "$current" "$latest" || failed=1
+    else
+      log_warn "Kubernetes ${branch}: patch check unavailable."
+      failed=1
+    fi
+  else
+    log_warn "Kubernetes: patch check requires K8S_VERSION=x.y.z (optional v prefix)."
+    failed=1
+  fi
+  if latest="$(fetch_release_version https://dl.k8s.io/release/stable.txt)"; then
+    report_release "Kubernetes latest stable" "$current" "$latest" || failed=1
+  else
+    log_warn "Kubernetes: latest stable check unavailable."
+    failed=1
+  fi
+  log_info "Release notes: https://kubernetes.io/releases/"
+  log_info "New Kubernetes releases may require a newer Minikube. No versions or clusters were changed."
+  return "$failed"
 }
 
 # Show usage information
@@ -506,6 +416,7 @@ Commands:
   stop               Stop cluster(s)
   delete             Delete cluster(s) (with confirmation)
   status             Show cluster status
+  updates            Check Minikube and Kubernetes updates (requires curl + jq)
   metrics install    Install metrics-server
   metrics uninstall  Uninstall metrics-server
   registry install   Enable in-cluster registry addon
@@ -564,74 +475,59 @@ EOF
 main() {
   local command="${1:-}"
 
-  # Commands that actually require minikube binary
   case "${command}" in
-    start|stop|delete|status|metrics|registry)
-      ensure_installed minikube "https://minikube.sigs.k8s.io/docs/start/"
-      ;;
-  esac
-
-  # Commands that require helm binary (metrics-server uses Helm)
-  case "${command}" in
-    metrics)
-      ensure_installed helm "https://helm.sh/docs/intro/install/"
-      ;;
-    start)
-      if ! command -v kubectl >/dev/null 2>&1; then
-        log_error "kubectl is required to update per-cluster kubeconfig files. Please install it and re-run this script."
-        exit 1
+    help|--help|-h) show_usage; return ;;
+    updates)
+      if (( $# != 1 )); then
+        log_error "updates does not accept arguments."
+        return 1
       fi
-      if [[ "${METRICS_SERVER}" == "true" ]]; then
-        ensure_installed helm "https://helm.sh/docs/intro/install/"
+      check_updates
+      return
+      ;;
+    start|stop|delete|status)
+      if (( $# != 1 )); then
+        log_error "${command} does not accept arguments."
+        return 1
       fi
       ;;
-  esac
-
-  case "${command}" in
-    start)
-      start_clusters
-      ;;
-    stop)
-      stop_clusters
-      ;;
-    delete)
-      delete_clusters
-      ;;
-    status)
-      show_status
-      ;;
-    metrics)
-      local metrics_cmd="${2:-}"
-      case "${metrics_cmd}" in
-        install)
-          install_metrics_server
-          ;;
-        uninstall)
-          uninstall_metrics_server
-          ;;
-        *)
-          log_error "Unknown metrics command: ${metrics_cmd}"
-          echo "Usage: ${SCRIPT_NAME} metrics [install|uninstall]"
-          exit 1
-          ;;
+    metrics|registry)
+      if (( $# != 2 )); then
+        log_error "Invalid ${command} subcommand. See ${SCRIPT_NAME} help."
+        return 1
+      fi
+      case "${command}:${2}" in
+        metrics:install|metrics:uninstall|registry:install|registry:uninstall|registry:port) ;;
+        *) log_error "Invalid ${command} subcommand. See ${SCRIPT_NAME} help."; return 1 ;;
       esac
       ;;
-    registry)
-      registry_command "${2:-}"
+    *) show_usage; return 1 ;;
+  esac
+  validate_configuration
+
+  if [[ "${command}" != metrics ]]; then
+    ensure_installed minikube "https://minikube.sigs.k8s.io/docs/start/"
+  fi
+  if [[ "${command}" == start ]] && ! command -v kubectl >/dev/null 2>&1; then
+    log_error "kubectl is required to update per-cluster kubeconfig files. Please install it and re-run this script."
+    return 1
+  fi
+  if [[ "${command}" == metrics || ( "${command}" == start && "${METRICS_SERVER}" == true ) ]]; then
+    ensure_installed helm "https://helm.sh/docs/intro/install/"
+  fi
+
+  case "${command}" in
+    start) start_clusters ;;
+    stop) stop_clusters ;;
+    delete) delete_clusters ;;
+    status) show_status ;;
+    metrics)
+      case "$2" in
+        install) install_metrics_server ;;
+        uninstall) uninstall_metrics_server ;;
+      esac
       ;;
-    help|--help|-h)
-      show_usage
-      ;;
-    "")
-      log_error "No command specified"
-      show_usage
-      exit 1
-      ;;
-    *)
-      log_error "Unknown command: ${command}"
-      show_usage
-      exit 1
-      ;;
+    registry) registry_command "$2" ;;
   esac
 }
 

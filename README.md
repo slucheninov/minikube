@@ -13,12 +13,17 @@ Local Kubernetes lab on Minikube: a single script for single and multi-cluster s
 
 ## Prerequisites
 
-- [Minikube](https://minikube.sigs.k8s.io/docs/start/) installed
+- [Minikube](https://minikube.sigs.k8s.io/docs/start/) installed (local version: 1.39.0)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) installed
 - [Helm](https://helm.sh/docs/intro/install/) installed (for metrics-server and other services)
 - [helmfile](https://helmfile.readthedocs.io/) + [helm-diff](https://github.com/databus23/helm-diff) (for services in `helmfile.yaml`)
 - zsh (`minikube.sh` is a zsh script)
+- bash and jq (for `scripts/vault-init.sh` and offline tests)
 - [Docker](https://docs.docker.com/get-docker/) (only for local images in `docker/`)
+
+Missing Minikube/Helm tools can be installed interactively through Homebrew.
+On other setups, the script prints the official installation guide and exits; it
+does not download and execute installer scripts.
 
 ## Repository Layout
 
@@ -29,6 +34,7 @@ charts/<name>/   Values files for each release (variants: values-<variant>.yaml)
 manifests/       Plain Kubernetes manifests for `kubectl apply -f`
 docker/<name>/   Local Docker images (envoy, nginx) with run.sh
 scripts/         Helper scripts (vault-init.sh)
+tests/           Offline regression tests for scripts
 .secrets/        Generated secrets, gitignored (Vault keys)
 examples/        Standalone sidecar pattern demos
 ```
@@ -77,6 +83,36 @@ METRICS_SERVER=true ./minikube.sh start
 ./minikube.sh delete
 ```
 
+### Check for Updates
+
+```bash
+./minikube.sh updates
+K8S_VERSION=1.35.9 ./minikube.sh updates
+```
+
+The check highlights `UPDATE` when a newer stable version exists:
+
+- Minikube: installed CLI version versus the latest stable GitHub release.
+- Kubernetes patch: configured `K8S_VERSION` versus the latest patch in that minor branch.
+- Kubernetes latest stable: configured version versus the newest stable release across branches.
+
+The repository default is also printed. Kubernetes comparisons use the configured
+version for `start`, not the version of an existing cluster. A new upstream release
+may require a newer Minikube; the check does not certify compatibility or upgrade
+anything. It works without a running cluster and requires `curl` and `jq`.
+
+Sources: [Minikube releases](https://github.com/kubernetes/minikube/releases),
+[Kubernetes stable](https://dl.k8s.io/release/stable.txt) and the matching
+`stable-<major>.<minor>.txt` marker. Each request has a 5-second connection timeout
+and 15-second total timeout. Unavailable checks are reported explicitly and return
+exit code 1; successful checks return 0 even when updates are available. Missing
+Minikube or non-stable version strings are reported as incomplete checks.
+
+Run this command when reviewing updates. Regular lifecycle commands do not add
+network checks. After reviewing release notes, update Minikube with your package
+manager and change the Kubernetes pin deliberately; changing `K8S_VERSION` alone
+does not describe or migrate an existing cluster.
+
 ### Metrics Server Management
 
 ```bash
@@ -86,6 +122,12 @@ METRICS_SERVER=true ./minikube.sh start
 # Uninstall metrics-server
 ./minikube.sh metrics uninstall
 ```
+
+Metrics commands target the first profile in `CLUSTERS` through an explicit Helm
+`--kube-context`; they do not change the active context. Stop/delete/status return
+a nonzero exit code on partial failure after attempting every requested profile.
+Invalid arguments, duplicate/empty profile names and boolean typos are rejected
+before cluster operations.
 
 ### Registry Management
 
@@ -109,7 +151,7 @@ The script uses environment variables for configuration. All variables are optio
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CLUSTERS` | `cluster-1` | Comma-separated list of cluster names |
-| `K8S_VERSION` | `1.34.8` | Kubernetes version to use |
+| `K8S_VERSION` | `1.35.9` | Kubernetes version to use |
 | `CNI` | (empty) | CNI plugin: `cilium`, `calico`, or empty for default |
 | `SERVICE_CIDR` | (auto) | Service cluster IP range (auto-assigned for known clusters) |
 | `METRICS_SERVER` | `false` | Install metrics-server on start: `true` or `false` |
@@ -150,7 +192,7 @@ METRICS_SERVER=true ./minikube.sh start
 ### Example 4: Custom Kubernetes Version
 
 ```bash
-K8S_VERSION=1.32.0 ./minikube.sh start
+K8S_VERSION=1.34.12 ./minikube.sh start
 ```
 
 ### Example 5: Multi-Cluster with Custom Configuration
@@ -158,7 +200,7 @@ K8S_VERSION=1.32.0 ./minikube.sh start
 ```bash
 CLUSTERS="cluster-1,cluster-2,cluster-3" \
 CNI=cilium \
-K8S_VERSION=1.34.8 \
+K8S_VERSION=1.35.9 \
 METRICS_SERVER=true \
 ./minikube.sh start
 ```
@@ -206,7 +248,7 @@ Always pass a selector: a bare `helmfile apply` installs every release.
 
 | Release | Group | Notes |
 |---------|-------|-------|
-| cert-manager, argocd, vault, rabbitmq-operator | `platform` | After Vault install run `scripts/vault-init.sh` (keys go to gitignored `.secrets/`) |
+| cert-manager, argocd, vault, rabbitmq-operator | `platform` | After Vault install run `KUBE_CONTEXT=cluster-1 scripts/vault-init.sh` (see credential setup below) |
 | coredns, external-dns | `dns` | Values variant via `COREDNS_VALUES` / `EXTERNAL_DNS_VALUES`, e.g. `COREDNS_VALUES=values-etcd.yaml` |
 | prometheus, grafana, kube-state-metrics | `monitoring` | |
 | keydb, opensearch | `data` | |
@@ -216,7 +258,96 @@ metrics-server is installed via `./minikube.sh metrics install`, not helmfile.
 
 `COREDNS_VALUES=values-redis.yaml` uses the `keydb` release as backend (zone fixture: `charts/keydb/coredns-zone-fixture.json`). The etcd variants of CoreDNS and external-dns expect an existing etcd in namespace `etcd`; it is not deployed by this repo.
 
-### Manifests
+## Local Service Credentials
+
+Fixed test credentials are intentional for this local Minikube lab. They can
+remain in values and manifests; no password generation or manual Secret setup is
+required. Grafana uses `admin` / `admin`; KeyDB and the CoreDNS Redis variant share
+the same test password. Argo CD retains its configured test admin password hash.
+
+RabbitMQ user Secrets are included in `manifests/rabbitmq/users.yaml`. After
+installing `rabbitmq-operator`, apply the directory as usual:
+
+```bash
+kubectl --context=cluster-1 apply -f manifests/rabbitmq/
+```
+
+The exporter reads the monitoring password from the included Secret so it does
+not need a duplicate password in the cluster manifest. The `guest` user remains
+a lab administrator; the monitoring user has management monitoring access with
+AMQP configure/write/read permissions removed. RabbitMQ uses cluster-provided DNS.
+
+Argo CD serves HTTPS with its generated certificate; ingress is disabled. Access
+it locally with:
+
+```bash
+kubectl --context=cluster-1 -n argocd port-forward svc/argocd-server 8443:443
+```
+
+Open `https://localhost:8443` and use the existing test admin credentials.
+
+### Vault
+
+```bash
+KUBE_CONTEXT=cluster-1 scripts/vault-init.sh         # initialize once, then unseal
+KUBE_CONTEXT=cluster-1 scripts/vault-init.sh unseal  # retry join/unseal with saved keys
+```
+
+`KUBE_CONTEXT` is mandatory. `NAMESPACE` defaults to `vault`; `KEYS_FILE` defaults
+to `.secrets/vault-cluster-keys.json`. For multiple clusters, set distinct
+`KEYS_FILE` paths and use the same path when unsealing that cluster. Back up this
+file securely: the lab uses a single unseal share and stores the root token there.
+The script creates the file with mode `600`, refuses to overwrite it, and retains
+partial output if initialization fails. Inspect that file and the server state
+before recovery; do not delete it merely to retry initialization. The unseal key
+is sent as JSON on stdin through [`vault write`](https://developer.hashicorp.com/vault/docs/commands/write),
+without appearing in process arguments. The root token is not printed.
+
+## Security Review and Follow-up
+
+Fixed test passwords are an accepted local-lab default, not a finding requiring
+rotation or Git history cleanup. The items below concern reliability, host
+isolation, or optional hardening if the lab is later shared or exposed. No image
+CVE scan or live-cluster audit is implied.
+
+| Priority | Remaining issue | Suggested next step |
+|----------|-----------------|---------------------|
+| High | Vault listener disables TLS and uses one unseal share; root token and share are stored together | Configure trusted TLS, separate custody/backups, and use auto-unseal or a multi-share policy for a shared environment |
+| High | OpenSearch has an explicitly privileged sysctl init container | Set required sysctls on lab nodes, then remove the privileged container and verify startup |
+| Medium | CoreDNS Redis variant allows unrestricted AXFR/IXFR and `transfer to *` | Restrict transfers to known secondaries or disable them if unused |
+| Medium | etcd variants use HTTP; external-dns's HTTP endpoint is paired with enabled TLS settings | Choose one matching endpoint/TLS configuration and deploy authenticated etcd separately |
+| Medium | Istio explicitly disables automatic mTLS | Enable and test mesh mTLS before relying on workload isolation |
+| Medium | metrics-server skips kubelet certificate verification; registry addon is HTTP | Keep these lab-only; configure trusted certificates/TLS where applicable |
+| Medium | Old pinned charts/images, floating image tags, custom CoreDNS build without provenance in this repo | Scan actual image digests with Trivy/Grype, review upgrades, pin digests, document the custom image source |
+| Medium | Demo workloads lack consistent resource limits, restricted security contexts and network policies | Add controls per workload and test DNS, monitoring and sidecar behavior with a policy-enforcing CNI |
+
+Local Docker demo ports bind to `127.0.0.1`. Envoy's demo admin listener also binds
+to loopback. Its GCS upstream now checks the certificate chain and DNS name using
+the container CA bundle, following the [Envoy TLS guidance](https://www.envoyproxy.io/docs/envoy/latest/start/quick-start/securing).
+Validate the configuration against the actual Envoy image before rollout.
+
+## Validation
+
+```bash
+zsh -n minikube.sh
+bash -n scripts/vault-init.sh
+sh -n docker/envoy/run.sh
+sh -n docker/nginx/run.sh
+python3 -m unittest discover -s tests -v
+helmfile -l name=keydb template
+COREDNS_VALUES=values-redis.yaml helmfile -l name=coredns template
+helmfile -l name=grafana template
+helmfile -l name=argocd template
+```
+
+Offline tests use fake `minikube`, `kubectl`, and `helm` commands and an isolated
+home directory; they do not contact clusters. Chart rendering validates templates,
+not application startup. Next, run single/multi-cluster smoke tests in a disposable
+lab, including Vault recovery, RabbitMQ metrics, Redis-backed DNS and HTTPS access.
+Add these offline checks and a secret scanner to CI; keep chart/image upgrades in
+separate changes with integration checks.
+
+## Manifests
 
 ```bash
 kubectl apply -f manifests/argocd/headless-service.yaml   # after argocd

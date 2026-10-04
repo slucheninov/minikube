@@ -1,3 +1,4 @@
+# Fixed test credentials are intentional for this local Minikube lab.
 image:
   repository: autosetup/coredns
   # Overrides the image tag whose default is the chart appVersion.

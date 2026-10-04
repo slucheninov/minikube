@@ -19,3 +19,6 @@ credentials.json
 .env
 
 .secrets/
+.env.*
+!.env.example
+__pycache__/

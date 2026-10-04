@@ -1,9 +1,7 @@
 server:
   replicas: 1
   ingress:
-    enabled: true
-  extraArgs:
-  - --insecure
+    enabled: false
   # service:
   #   type: NodePort
   #   nodePortHttp: 30180
@@ -11,6 +9,7 @@ controller:
   args:
     appResyncPeriod: 30
 configs:
+  # Fixed test admin credential for the local lab.
   secret:
     argocdServerAdminPassword: "$2a$10$icofurtCeEt2nL1PPqc/0u//9cXZdR/hgL22y9MeSPyTuHD3KfA1q"
     argocdServerAdminPasswordMtime: "2021-11-08T15:04:05Z"

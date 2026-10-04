@@ -1,3 +1,4 @@
+# Fixed test credentials are intentional for this local Minikube lab.
 ---
 apiVersion: v1
 kind: Secret
@@ -75,9 +76,9 @@ spec:
   vhost: "/"
   user: "monitoring"
   permissions:
-    write: ".*"
-    configure: ".*"
-    read: ".*"
+    write: "^$"
+    configure: "^$"
+    read: "^$"
   rabbitmqClusterReference:
     name: k8s-rabbitmq-services
 

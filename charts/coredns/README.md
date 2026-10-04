@@ -45,6 +45,7 @@ Features:
 
 **Prerequisites:**
 - `keydb` release deployed (`helmfile -l name=keydb apply`); see `charts/keydb/coredns-zone-fixture.json`
+- KeyDB and this Redis variant intentionally share a fixed test password; no manual Secret creation is required.
 
 #### Example.com Configuration (`values-example.com.yaml`)
 
