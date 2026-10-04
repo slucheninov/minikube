@@ -1,77 +1,27 @@
-# CoreDNS Helm Deployment
+# CoreDNS
 
-This directory contains configuration and deployment script for running CoreDNS in Kubernetes using Helm.
+Values for the `coredns` release in `helmfile.yaml` (chart `coredns/coredns` v1.28.2, namespace `coredns`).
 
-## Structure
-
-```
-coredns/
-├── README.md                           # This file
-└── values/                             # Helm values files
-    ├── helm-values.yaml                # Default configuration
-    ├── helm-values-etcd.yaml           # Configuration with etcd backend
-    ├── helm-values-redis.yaml          # Configuration with Redis backend
-    └── helm-values-example.com.yaml    # Example.com specific configuration
-```
-
-## Quick Start
-
-### 1. Initialize Helm Repository
+## Usage
 
 ```bash
-cd helm
-./coredns.sh init
-```
+helmfile -l name=coredns apply                                   # default values.yaml
+COREDNS_VALUES=values-etcd.yaml helmfile -l name=coredns apply   # etcd backend
+COREDNS_VALUES=values-redis.yaml helmfile -l name=coredns apply  # Redis backend
+helmfile -l name=coredns destroy
 
-### 2. Deploy CoreDNS
-
-**Default configuration:**
-```bash
-./coredns.sh start
-```
-
-**With etcd backend:**
-```bash
-./coredns.sh start --values coredns/values/helm-values-etcd.yaml
-```
-
-**With Redis backend:**
-```bash
-./coredns.sh start --values coredns/values/helm-values-redis.yaml
-```
-
-**With custom configuration:**
-```bash
-./coredns.sh start --values coredns/values/helm-values-example.com.yaml
-```
-
-### 3. Check Status
-
-```bash
-./coredns.sh status
-```
-
-### 4. Stop and Remove
-
-```bash
-./coredns.sh stop
+kubectl get pods,svc,cm -n coredns -l app.kubernetes.io/name=coredns
 ```
 
 ## Configuration
 
-### Helm Chart Version
-
-Current configuration uses:
-- **Chart:** coredns/coredns v1.28.2
-- **Repository:** https://coredns.github.io/helm
-
 ### Values Files
 
-#### Default Configuration (`values/helm-values.yaml`)
+#### Default Configuration (`values.yaml`)
 
 Standard CoreDNS configuration suitable for most use cases.
 
-#### etcd Backend Configuration (`values/helm-values-etcd.yaml`)
+#### etcd Backend Configuration (`values-etcd.yaml`)
 
 CoreDNS configured to use etcd as backend for dynamic DNS records.
 
@@ -81,10 +31,10 @@ Features:
 - Resource limits: 100m CPU, 128Mi Memory
 
 **Prerequisites:**
-- etcd cluster must be deployed first (see `../../coredns-etcd/`)
+- an etcd cluster must be deployed separately (not part of this repo)
 - etcd endpoint should be accessible from CoreDNS pods
 
-#### Redis Backend Configuration (`values/helm-values-redis.yaml`)
+#### Redis Backend Configuration (`values-redis.yaml`)
 
 CoreDNS configured to use Redis as backend for dynamic DNS records.
 
@@ -94,35 +44,11 @@ Features:
 - Resource limits: 100m CPU, 128Mi Memory
 
 **Prerequisites:**
-- Redis instance must be deployed and accessible
+- `keydb` release deployed (`helmfile -l name=keydb apply`); see `charts/keydb/coredns-zone-fixture.json`
 
-#### Example.com Configuration (`values/helm-values-example.com.yaml`)
+#### Example.com Configuration (`values-example.com.yaml`)
 
 Domain-specific configuration for example.com.
-
-## Commands
-
-### Available Commands
-
-```bash
-./coredns.sh init       # Initialize Helm repository
-./coredns.sh start      # Deploy CoreDNS
-./coredns.sh stop       # Remove CoreDNS
-./coredns.sh status     # Check CoreDNS status
-./coredns.sh help       # Show help message
-```
-
-### Script Features
-
-- ✅ bash-based (better compatibility)
-- ✅ Strict error handling (`set -euo pipefail`)
-- ✅ Color-coded logging (INFO/WARN/ERROR)
-- ✅ Status command for health checks
-- ✅ Help command with examples
-- ✅ Custom values file support via `--values`
-- ✅ 10-minute timeout for deployments
-- ✅ File validation
-- ✅ Interactive namespace deletion prompt
 
 ## Troubleshooting
 
@@ -230,29 +156,6 @@ prometheus:
     enabled: true
 ```
 
-## Integration with etcd
-
-To use CoreDNS with etcd backend:
-
-1. **Deploy etcd cluster first:**
-   ```bash
-   cd ../..
-   ./coredns-etcd.sh init
-   ./coredns-etcd.sh start
-   ```
-
-2. **Deploy CoreDNS with etcd configuration:**
-   ```bash
-   cd helm
-   ./coredns.sh start --values coredns/values/helm-values-etcd.yaml
-   ```
-
-3. **Verify connection:**
-   ```bash
-   ./coredns.sh status
-   kubectl logs -n coredns -l app.kubernetes.io/name=coredns | grep etcd
-   ```
-
 ## References
 
 - [CoreDNS Official Documentation](https://coredns.io/manual/toc/)
@@ -264,5 +167,4 @@ To use CoreDNS with etcd backend:
 
 For issues with:
 - **CoreDNS chart:** Check [CoreDNS Helm Chart Issues](https://github.com/coredns/helm/issues)
-- **etcd integration:** See `../../coredns-etcd/README.md`
 - **Custom images:** Verify image availability and tags

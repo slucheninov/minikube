@@ -1,6 +1,6 @@
 # Minikube Cluster Management
 
-This repository provides tools and scripts for managing Minikube Kubernetes clusters with support for single and multi-cluster setups.
+Local Kubernetes lab on Minikube: a single script for single and multi-cluster setups, plus declarative Helm releases (helmfile) and manifests for common services.
 
 ## Features
 
@@ -9,14 +9,29 @@ This repository provides tools and scripts for managing Minikube Kubernetes clus
 - **CNI support** - Support for Cilium, Calico, and default CNI plugins
 - **Metrics Server integration** - Optional automatic installation of metrics-server
 - **Image registry** - Optional in-cluster registry addon and support for trusting external insecure registries
-- **Helm charts** - Pre-configured Helm charts for common services
+- **Helm services** - Declarative releases in `helmfile.yaml` with values in `charts/`
 
 ## Prerequisites
 
 - [Minikube](https://minikube.sigs.k8s.io/docs/start/) installed
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) installed
 - [Helm](https://helm.sh/docs/intro/install/) installed (for metrics-server and other services)
-- zsh shell (scripts are written for zsh)
+- [helmfile](https://helmfile.readthedocs.io/) + [helm-diff](https://github.com/databus23/helm-diff) (for services in `helmfile.yaml`)
+- zsh (`minikube.sh` is a zsh script)
+- [Docker](https://docs.docker.com/get-docker/) (only for local images in `docker/`)
+
+## Repository Layout
+
+```
+minikube.sh      Cluster lifecycle (start/stop/delete, metrics-server, registry addon)
+helmfile.yaml    All Helm releases (repos, chart versions, namespaces, labels)
+charts/<name>/   Values files for each release (variants: values-<variant>.yaml)
+manifests/       Plain Kubernetes manifests for `kubectl apply -f`
+docker/<name>/   Local Docker images (envoy, nginx) with run.sh
+scripts/         Helper scripts (vault-init.sh)
+.secrets/        Generated secrets, gitignored (Vault keys)
+examples/        Standalone sidecar pattern demos
+```
 
 ## Quick Start
 
@@ -94,7 +109,7 @@ The script uses environment variables for configuration. All variables are optio
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CLUSTERS` | `cluster-1` | Comma-separated list of cluster names |
-| `K8S_VERSION` | `1.33.6` | Kubernetes version to use |
+| `K8S_VERSION` | `1.34.8` | Kubernetes version to use |
 | `CNI` | (empty) | CNI plugin: `cilium`, `calico`, or empty for default |
 | `SERVICE_CIDR` | (auto) | Service cluster IP range (auto-assigned for known clusters) |
 | `METRICS_SERVER` | `false` | Install metrics-server on start: `true` or `false` |
@@ -143,7 +158,7 @@ K8S_VERSION=1.32.0 ./minikube.sh start
 ```bash
 CLUSTERS="cluster-1,cluster-2,cluster-3" \
 CNI=cilium \
-K8S_VERSION=1.33.6 \
+K8S_VERSION=1.34.8 \
 METRICS_SERVER=true \
 ./minikube.sh start
 ```
@@ -178,19 +193,48 @@ minikube profile list
 
 ## Additional Services
 
-This repository includes Helm charts and scripts for various services:
+Helm releases are managed with [helmfile](https://helmfile.readthedocs.io/) (requires `helmfile` and the `helm-diff` plugin: `helm plugin install https://github.com/databus23/helm-diff`).
 
-- **ArgoCD** - GitOps continuous delivery tool
-- **Cert-Manager** - Certificate management
-- **CoreDNS** - DNS server
-- **External-DNS** - DNS management
-- **Grafana** - Metrics visualization
-- **Metrics Server** - Kubernetes metrics API
-- **Prometheus** - Monitoring and alerting
-- **RabbitMQ** - Message broker
-- **Vault** - Secrets management
+```bash
+helmfile list                          # all releases with labels
+helmfile -l name=vault apply           # install / upgrade one release
+helmfile -l group=monitoring apply     # prometheus, grafana, kube-state-metrics
+helmfile -l name=vault destroy         # uninstall
+```
 
-Each service has its own directory under `helm/` with configuration files and installation scripts.
+Always pass a selector: a bare `helmfile apply` installs every release.
+
+| Release | Group | Notes |
+|---------|-------|-------|
+| cert-manager, argocd, vault, rabbitmq-operator | `platform` | After Vault install run `scripts/vault-init.sh` (keys go to gitignored `.secrets/`) |
+| coredns, external-dns | `dns` | Values variant via `COREDNS_VALUES` / `EXTERNAL_DNS_VALUES`, e.g. `COREDNS_VALUES=values-etcd.yaml` |
+| prometheus, grafana, kube-state-metrics | `monitoring` | |
+| keydb, opensearch | `data` | |
+| nginx, nginx2 | `demo` | Two nginx instances with different CoreDNS agent labels |
+
+metrics-server is installed via `./minikube.sh metrics install`, not helmfile.
+
+`COREDNS_VALUES=values-redis.yaml` uses the `keydb` release as backend (zone fixture: `charts/keydb/coredns-zone-fixture.json`). The etcd variants of CoreDNS and external-dns expect an existing etcd in namespace `etcd`; it is not deployed by this repo.
+
+### Manifests
+
+```bash
+kubectl apply -f manifests/argocd/headless-service.yaml   # after argocd
+kubectl apply -f manifests/rabbitmq/                       # after rabbitmq-operator
+kubectl apply -f manifests/istio/envoy-filter-coredns.yaml # needs Istio
+kubectl apply -f manifests/test/scale-nodes-nginx.yaml     # node scaling test
+```
+
+`manifests/istio/istio-operator.yaml` is an `IstioOperator` spec for `istioctl install -f`.
+
+### Local Docker images
+
+```bash
+docker/envoy/run.sh   # builds envoy:v1, runs on :8080
+docker/nginx/run.sh   # builds nginx:v1, runs on :81
+```
+
+Both create the shared Docker network `netlite` if it is missing.
 
 ## Troubleshooting
 
@@ -412,12 +456,9 @@ For more information, see the [Minikube GCP Auth documentation](https://minikube
 
 ## Contributing
 
-When adding new services or features:
-
-1. Follow the existing script structure
-2. Add appropriate error handling
-3. Update this README with usage examples
-4. Test with both single and multi-cluster setups
+- New Helm service: add a release to `helmfile.yaml` (and its repo if new), put values in `charts/<name>/values.yaml`, add it to the table above.
+- Plain YAML goes to `manifests/<area>/`, local images to `docker/<name>/`, helper scripts to `scripts/`.
+- Changes to `minikube.sh`: test with both single and multi-cluster setups and update this README.
 
 ## License
 

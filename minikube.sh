@@ -12,10 +12,11 @@
 #   delete      - Delete cluster(s)
 #   status      - Show cluster status
 #   metrics     - Install/uninstall metrics-server
+#   registry    - Enable/disable in-cluster registry addon, show its host:port
 #
 # Environment variables:
 #   CLUSTERS          - Comma-separated list of cluster names (default: cluster-1)
-#   K8S_VERSION       - Kubernetes version (default: 1.33.6)
+#   K8S_VERSION       - Kubernetes version (default: 1.34.8)
 #   CNI               - CNI plugin: cilium, calico, or none (default: none)
 #   SERVICE_CIDR      - Service cluster IP range (default: auto)
 #   METRICS_SERVER    - Install metrics-server: true/false (default: false)
@@ -48,6 +49,7 @@ METRICS_SERVER="${METRICS_SERVER:-${DEFAULT_METRICS_SERVER}}"
 METRICS_VERSION="${METRICS_VERSION:-${DEFAULT_METRICS_VERSION}}"
 REGISTRY="${REGISTRY:-${DEFAULT_REGISTRY}}"
 INSECURE_REGISTRIES="${INSECURE_REGISTRIES:-${DEFAULT_INSECURE_REGISTRIES}}"
+typeset -ra CLUSTER_LIST=("${(@s:,:)CLUSTERS}")
 
 # Service CIDR mapping for multi-cluster setups
 typeset -A SERVICE_CIDR_MAP
@@ -74,22 +76,10 @@ log_error() {
   echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
-# Check that minikube is installed; otherwise suggest the official install method
-check_minikube_installed() {
-  if command -v minikube >/dev/null 2>&1; then
-    return 0
-  fi
-
-  log_error "minikube is not installed or not found in PATH."
-  echo
-  echo "Install minikube using the method recommended by the official documentation:"
-  echo "  https://minikube.sigs.k8s.io/docs/start/"
-  echo
-
-  local os_name
-  os_name="$(uname -s)"
-  local arch
-  arch="$(uname -m)"
+# Print OS-specific minikube install hints
+print_minikube_install_hints() {
+  local os_name="$1"
+  local arch="$2"
 
   case "${os_name}" in
     Darwin)
@@ -128,43 +118,12 @@ check_minikube_installed() {
       echo "Unsupported OS: ${os_name}. See https://minikube.sigs.k8s.io/docs/start/"
       ;;
   esac
-
-  echo
-  read -q "REPLY?Attempt automatic installation now? (y/N): " || true
-  echo
-
-  if [[ "${REPLY}" =~ ^[Yy]$ ]]; then
-    install_minikube_auto "${os_name}" "${arch}" || {
-      log_error "Automatic installation failed. Please install minikube manually."
-      exit 1
-    }
-    if ! command -v minikube >/dev/null 2>&1; then
-      log_error "minikube still not found in PATH after installation."
-      exit 1
-    fi
-    log_info "minikube installed: $(minikube version --short 2>/dev/null || minikube version | head -n1)"
-  else
-    log_info "Please install minikube and re-run this script."
-    exit 1
-  fi
 }
 
-# Check that helm is installed; otherwise suggest the official install method
-check_helm_installed() {
-  if command -v helm >/dev/null 2>&1; then
-    return 0
-  fi
-
-  log_error "helm is not installed or not found in PATH."
-  echo
-  echo "Install helm using the method recommended by the official documentation:"
-  echo "  https://helm.sh/docs/intro/install/"
-  echo
-
-  local os_name
-  os_name="$(uname -s)"
-  local arch
-  arch="$(uname -m)"
+# Print OS-specific helm install hints
+print_helm_install_hints() {
+  local os_name="$1"
+  local arch="$2"
 
   case "${os_name}" in
     Darwin)
@@ -190,25 +149,50 @@ check_helm_installed() {
       echo "Unsupported OS: ${os_name}. See https://helm.sh/docs/intro/install/"
       ;;
   esac
+}
+
+# Check that a tool (minikube or helm) is installed; otherwise suggest the
+# official install method and offer automatic installation
+ensure_installed() {
+  local tool="$1"
+  local docs_url="$2"
+
+  if command -v "${tool}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  log_error "${tool} is not installed or not found in PATH."
+  echo
+  echo "Install ${tool} using the method recommended by the official documentation:"
+  echo "  ${docs_url}"
+  echo
+
+  local os_name
+  os_name="$(uname -s)"
+  local arch
+  arch="$(uname -m)"
+
+  "print_${tool}_install_hints" "${os_name}" "${arch}"
 
   echo
+  local REPLY=""
   read -q "REPLY?Attempt automatic installation now? (y/N): " || true
   echo
 
-  if [[ "${REPLY}" =~ ^[Yy]$ ]]; then
-    install_helm_auto "${os_name}" || {
-      log_error "Automatic installation failed. Please install helm manually."
-      exit 1
-    }
-    if ! command -v helm >/dev/null 2>&1; then
-      log_error "helm still not found in PATH after installation."
-      exit 1
-    fi
-    log_info "helm installed: $(helm version --short 2>/dev/null || helm version | head -n1)"
-  else
-    log_info "Please install helm and re-run this script."
+  if [[ ! "${REPLY}" =~ ^[Yy]$ ]]; then
+    log_info "Please install ${tool} and re-run this script."
     exit 1
   fi
+
+  "install_${tool}_auto" "${os_name}" "${arch}" || {
+    log_error "Automatic installation failed. Please install ${tool} manually."
+    exit 1
+  }
+  if ! command -v "${tool}" >/dev/null 2>&1; then
+    log_error "${tool} still not found in PATH after installation."
+    exit 1
+  fi
+  log_info "${tool} installed: $("${tool}" version --short 2>/dev/null || "${tool}" version | head -n1)"
 }
 
 # Attempt automatic helm installation based on OS
@@ -290,25 +274,24 @@ get_service_cidr() {
   fi
 }
 
-# Build minikube start command
-build_start_command() {
+# Build minikube start arguments for a cluster into $reply
+build_start_args() {
   local cluster=$1
-  local cmd="minikube start --kubernetes-version=${K8S_VERSION} -p ${cluster}"
-  
+  reply=(start "--kubernetes-version=${K8S_VERSION}" -p "${cluster}")
+
   if [[ -n "${CNI}" ]]; then
-    cmd="${cmd} --cni=${CNI}"
+    reply+=("--cni=${CNI}")
   fi
-  
-  local service_cidr=$(get_service_cidr "${cluster}")
+
+  local service_cidr
+  service_cidr="$(get_service_cidr "${cluster}")"
   if [[ -n "${service_cidr}" ]]; then
-    cmd="${cmd} --service-cluster-ip-range=${service_cidr}"
+    reply+=("--service-cluster-ip-range=${service_cidr}")
   fi
 
   if [[ -n "${INSECURE_REGISTRIES}" ]]; then
-    cmd="${cmd} --insecure-registry=${INSECURE_REGISTRIES}"
+    reply+=("--insecure-registry=${INSECURE_REGISTRIES}")
   fi
-
-  echo "${cmd}"
 }
 
 # Enable the built-in minikube registry addon for a cluster
@@ -359,12 +342,11 @@ start_clusters() {
   log_info "  Registry addon: ${REGISTRY}"
   log_info "  Insecure registries: ${INSECURE_REGISTRIES:-none}"
 
-  local cluster_array=("${(@s:,:)CLUSTERS}")
-
-  for cluster in "${cluster_array[@]}"; do
+  local -a reply
+  for cluster in "${CLUSTER_LIST[@]}"; do
     log_info "Starting cluster: ${cluster}"
-    local cmd=$(build_start_command "${cluster}")
-    eval "${cmd}"
+    build_start_args "${cluster}"
+    minikube "${reply[@]}"
     sync_cluster_kubeconfig "${cluster}"
 
     if [[ "${REGISTRY}" == "true" ]]; then
@@ -386,9 +368,7 @@ start_clusters() {
 stop_clusters() {
   log_info "Stopping Minikube cluster(s)..."
   
-  local cluster_array=("${(@s:,:)CLUSTERS}")
-  
-  for cluster in "${cluster_array[@]}"; do
+  for cluster in "${CLUSTER_LIST[@]}"; do
     log_info "Stopping cluster: ${cluster}"
     minikube stop -p "${cluster}" || log_warn "Failed to stop ${cluster}"
   done
@@ -399,7 +379,8 @@ stop_clusters() {
 # Delete cluster(s)
 delete_clusters() {
   log_warn "This will delete all cluster data!"
-  read -q "REPLY?Are you sure? (y/N): "
+  local REPLY=""
+  read -q "REPLY?Are you sure? (y/N): " || true
   echo
   
   if [[ ! "${REPLY}" =~ ^[Yy]$ ]]; then
@@ -409,9 +390,7 @@ delete_clusters() {
   
   log_info "Deleting Minikube cluster(s)..."
   
-  local cluster_array=("${(@s:,:)CLUSTERS}")
-  
-  for cluster in "${cluster_array[@]}"; do
+  for cluster in "${CLUSTER_LIST[@]}"; do
     log_info "Deleting cluster: ${cluster}"
     minikube delete -p "${cluster}" || log_warn "Failed to delete ${cluster}"
   done
@@ -424,9 +403,7 @@ show_status() {
   log_info "Cluster status:"
   echo
   
-  local cluster_array=("${(@s:,:)CLUSTERS}")
-  
-  for cluster in "${cluster_array[@]}"; do
+  for cluster in "${CLUSTER_LIST[@]}"; do
     echo "=== ${cluster} ==="
     minikube status -p "${cluster}" 2>/dev/null || log_warn "Cluster ${cluster} is not running"
     echo
@@ -451,8 +428,7 @@ install_metrics_server() {
   fi
   
   # Use first cluster for metrics-server installation
-  local cluster_array=("${(@s:,:)CLUSTERS}")
-  local primary_cluster="${cluster_array[1]}"
+  local primary_cluster="${CLUSTER_LIST[1]}"
   
   log_info "Switching to cluster: ${primary_cluster}"
   minikube profile "${primary_cluster}"
@@ -473,8 +449,7 @@ install_metrics_server() {
 uninstall_metrics_server() {
   log_info "Uninstalling metrics-server..."
   
-  local cluster_array=("${(@s:,:)CLUSTERS}")
-  local primary_cluster="${cluster_array[1]}"
+  local primary_cluster="${CLUSTER_LIST[1]}"
   
   log_info "Switching to cluster: ${primary_cluster}"
   minikube profile "${primary_cluster}"
@@ -483,6 +458,39 @@ uninstall_metrics_server() {
     log_warn "Metrics-server not found or already uninstalled"
   
   log_info "Metrics-server uninstalled!"
+}
+
+# Handle `registry install|uninstall|port`
+registry_command() {
+  local registry_cmd="$1"
+  case "${registry_cmd}" in
+    install)
+      for cluster in "${CLUSTER_LIST[@]}"; do
+        enable_registry_addon "${cluster}"
+      done
+      ;;
+    uninstall)
+      for cluster in "${CLUSTER_LIST[@]}"; do
+        disable_registry_addon "${cluster}"
+      done
+      ;;
+    port)
+      for cluster in "${CLUSTER_LIST[@]}"; do
+        local ip
+        ip="$(minikube ip -p "${cluster}" 2>/dev/null || true)"
+        if [[ -n "${ip}" ]]; then
+          echo "${cluster}: ${ip}:5000"
+        else
+          log_warn "${cluster}: not running"
+        fi
+      done
+      ;;
+    *)
+      log_error "Unknown registry command: ${registry_cmd}"
+      echo "Usage: ${SCRIPT_NAME} registry [install|uninstall|port]"
+      exit 1
+      ;;
+  esac
 }
 
 # Show usage information
@@ -506,12 +514,12 @@ Commands:
   help               Show this help message
 
 Environment Variables:
-  CLUSTERS            Comma-separated list of cluster names (default: cluster-1)
-  K8S_VERSION         Kubernetes version (default: 1.33.6)
+  CLUSTERS            Comma-separated list of cluster names (default: ${DEFAULT_CLUSTERS})
+  K8S_VERSION         Kubernetes version (default: ${DEFAULT_K8S_VERSION})
   CNI                 CNI plugin: cilium, calico, or empty for default (default: empty)
   SERVICE_CIDR        Service cluster IP range (default: auto-assigned)
   METRICS_SERVER      Install metrics-server on start: true/false (default: false)
-  METRICS_VERSION     Metrics-server Helm chart version (default: 3.11.0)
+  METRICS_VERSION     Metrics-server Helm chart version (default: ${DEFAULT_METRICS_VERSION})
   REGISTRY            Enable in-cluster registry addon on start: true/false (default: false)
   INSECURE_REGISTRIES Comma-separated insecure registries to trust, e.g. host:5000 (default: empty)
 
@@ -559,14 +567,14 @@ main() {
   # Commands that actually require minikube binary
   case "${command}" in
     start|stop|delete|status|metrics|registry)
-      check_minikube_installed
+      ensure_installed minikube "https://minikube.sigs.k8s.io/docs/start/"
       ;;
   esac
 
   # Commands that require helm binary (metrics-server uses Helm)
   case "${command}" in
     metrics)
-      check_helm_installed
+      ensure_installed helm "https://helm.sh/docs/intro/install/"
       ;;
     start)
       if ! command -v kubectl >/dev/null 2>&1; then
@@ -574,7 +582,7 @@ main() {
         exit 1
       fi
       if [[ "${METRICS_SERVER}" == "true" ]]; then
-        check_helm_installed
+        ensure_installed helm "https://helm.sh/docs/intro/install/"
       fi
       ;;
   esac
@@ -603,42 +611,13 @@ main() {
           ;;
         *)
           log_error "Unknown metrics command: ${metrics_cmd}"
-          echo "Usage: $0 metrics [install|uninstall]"
+          echo "Usage: ${SCRIPT_NAME} metrics [install|uninstall]"
           exit 1
           ;;
       esac
       ;;
     registry)
-      local registry_cmd="${2:-}"
-      local cluster_array=("${(@s:,:)CLUSTERS}")
-      case "${registry_cmd}" in
-        install)
-          for cluster in "${cluster_array[@]}"; do
-            enable_registry_addon "${cluster}"
-          done
-          ;;
-        uninstall)
-          for cluster in "${cluster_array[@]}"; do
-            disable_registry_addon "${cluster}"
-          done
-          ;;
-        port)
-          for cluster in "${cluster_array[@]}"; do
-            local ip
-            ip="$(minikube ip -p "${cluster}" 2>/dev/null || true)"
-            if [[ -n "${ip}" ]]; then
-              echo "${cluster}: ${ip}:5000"
-            else
-              log_warn "${cluster}: not running"
-            fi
-          done
-          ;;
-        *)
-          log_error "Unknown registry command: ${registry_cmd}"
-          echo "Usage: $0 registry [install|uninstall|port]"
-          exit 1
-          ;;
-      esac
+      registry_command "${2:-}"
       ;;
     help|--help|-h)
       show_usage
