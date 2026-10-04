@@ -326,6 +326,28 @@ disable_registry_addon() {
     log_warn "registry addon not enabled on ${cluster}"
 }
 
+# Refresh the standalone kubeconfig for a started cluster.
+sync_cluster_kubeconfig() {
+  local cluster="$1"
+  local config_dir="${HOME}/.kube/clusters"
+  local config_file="${config_dir}/${cluster}"
+  local temp_file
+
+  mkdir -p "${config_dir}"
+  temp_file="$(mktemp "${config_file}.tmp.XXXXXX")"
+
+  # Export only this cluster, including credentials, before replacing its file.
+  if ! kubectl --context="${cluster}" config view --minify --flatten --raw > "${temp_file}"; then
+    rm -f "${temp_file}"
+    log_error "Failed to export kubeconfig for ${cluster}; ${config_file} was not changed."
+    return 1
+  fi
+
+  chmod 600 "${temp_file}"
+  mv -f "${temp_file}" "${config_file}"
+  log_info "Updated kubeconfig: ${config_file}"
+}
+
 # Start cluster(s)
 start_clusters() {
   log_info "Starting Minikube cluster(s)..."
@@ -343,6 +365,7 @@ start_clusters() {
     log_info "Starting cluster: ${cluster}"
     local cmd=$(build_start_command "${cluster}")
     eval "${cmd}"
+    sync_cluster_kubeconfig "${cluster}"
 
     if [[ "${REGISTRY}" == "true" ]]; then
       enable_registry_addon "${cluster}"
@@ -546,6 +569,10 @@ main() {
       check_helm_installed
       ;;
     start)
+      if ! command -v kubectl >/dev/null 2>&1; then
+        log_error "kubectl is required to update per-cluster kubeconfig files. Please install it and re-run this script."
+        exit 1
+      fi
       if [[ "${METRICS_SERVER}" == "true" ]]; then
         check_helm_installed
       fi

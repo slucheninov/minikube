@@ -26,6 +26,12 @@ This repository provides tools and scripts for managing Minikube Kubernetes clus
 ./minikube.sh start
 ```
 
+After each successful cluster start, the script also refreshes
+`~/.kube/clusters/<cluster-name>` (for example, `~/.kube/clusters/cluster-1`)
+from the kubeconfig updated by Minikube. Each file contains only that cluster's
+context and embedded credentials, with permissions set to `600`. The existing
+file is preserved if the export fails.
+
 ### Start Multiple Clusters
 
 ```bash
