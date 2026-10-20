@@ -1,0 +1,37 @@
+# charts-common/etcd values for release `etcd` in namespace `coredns`: values-bitnami.yaml converted
+# with the key mapping from charts-common/etcd/README.md. The image tag is set per step with
+# `--set image.tag=...` (default: v + appVersion = v3.5.11).
+replicaCount: 3
+
+etcd:
+  logLevel: info
+  autoCompactionMode: periodic
+  autoCompactionRetention: 72h
+
+tls:
+  client:
+    enabled: true
+    existingSecret: etcd-main-tls
+    certFilename: tls.crt
+    keyFilename: tls.key
+    caFilename: ca.crt
+    clientCertAuth: true
+  peer:
+    autoTLS: true
+
+metrics:
+  enabled: true
+
+podLabels:
+  app: coredns-etcd
+
+commonLabels:
+  "coredns-agent-auto": "enabled"
+  "coredns-agent-ttl": "10"
+
+persistence:
+  enabled: true
+  size: 10Gi
+
+updateStrategy:
+  type: OnDelete

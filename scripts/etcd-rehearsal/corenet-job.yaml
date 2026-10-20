@@ -1,0 +1,18 @@
+# Static records: one -agent=cli pass (prod: k8s/prod/<cluster>/corenet/job.yaml). Delete and re-apply to rerun.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: static-records, namespace: corenet}
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: corenet
+      containers:
+        - name: agent-cli
+          image: corenet-agent:dev
+          imagePullPolicy: Never
+          envFrom: [{configMapRef: {name: corenet-env}}]
+          args: [-agent=cli]
+          volumeMounts: [{name: tls, mountPath: /etc/tls, readOnly: true}]
+      volumes: [{name: tls, secret: {secretName: etcd-client-tls}}]

@@ -33,9 +33,9 @@ helmfile.yaml    All Helm releases (repos, chart versions, namespaces, labels)
 charts/<name>/   Values files for each release (variants: values-<variant>.yaml)
 manifests/       Plain Kubernetes manifests for `kubectl apply -f`
 docker/<name>/   Local Docker images (envoy, nginx) with run.sh
-scripts/         Helper scripts (vault-init.sh)
+scripts/         Helper scripts (vault-init.sh, etcd-rehearsal/)
 tests/           Offline regression tests for scripts
-.secrets/        Generated secrets, gitignored (Vault keys)
+.secrets/        Generated secrets, gitignored (Vault keys, etcd rehearsal CA)
 examples/        Standalone sidecar pattern demos
 ```
 
@@ -366,6 +366,14 @@ docker/nginx/run.sh   # builds nginx:v1, runs on :81
 ```
 
 Both create the shared Docker network `netlite` if it is missing.
+
+## etcd Upgrade Rehearsal
+
+`scripts/etcd-rehearsal/` reproduces the coredns etcd migration from the Bitnami chart 9.8.1 to the own
+`charts-common/etcd` chart and the upgrade 3.5.11 → 3.5.34 → 3.6.15 → 3.7.2 under a load generator that mimics
+corenet, lock and short-lease clients. It is not part of helmfile: the Bitnami and own charts are swapped on the
+same release `etcd` with plain `helm`. Setup, the step helper `rehearsal.sh` (`gate`, `roll`, `stats`) and cleanup:
+[scripts/etcd-rehearsal/README.md](scripts/etcd-rehearsal/README.md).
 
 ## Troubleshooting
 

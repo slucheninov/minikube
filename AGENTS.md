@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents (Claude Code, Codex, Gemini CLI,
 
 ## Overview
 
-Local Minikube lab (single or multi-cluster): one zsh script for cluster lifecycle, helmfile for Helm services, plain manifests. No build system or linter config. Offline script regression tests: `python3 -m unittest discover -s tests -v` (requires zsh, bash, jq; substitutes all cluster commands). Static checks: `zsh -n minikube.sh`, `shellcheck` for bash/sh scripts, `helmfile -l name=<release> template` for releases. Integration testing requires a Minikube cluster.
+Local Minikube lab (single or multi-cluster): one zsh script for cluster lifecycle, helmfile for Helm services, plain manifests. No build system or linter config. Offline script regression tests: `python3 -m unittest discover -s tests -v` (requires zsh, bash, jq; substitutes all cluster commands). Static checks: `zsh -n minikube.sh`, `shellcheck` for bash/sh scripts, `go vet` in `scripts/etcd-rehearsal/loadgen`, `helmfile -l name=<release> template` for releases. Integration testing requires a Minikube cluster.
 
 ## Main entrypoint: `minikube.sh`
 
@@ -40,6 +40,7 @@ charts/<name>/   values.yaml (+ values-<variant>.yaml) for the release of the sa
 manifests/       plain YAML for `kubectl apply -f` (argocd, istio, rabbitmq CRs, scale test)
 docker/<name>/   local images; run.sh builds from its own dir and runs on Docker network `netlite`
 scripts/         vault-init.sh (init|unseal 3-node raft Vault; explicit KUBE_CONTEXT; keys -> gitignored .secrets/)
+                 etcd-rehearsal/ (coredns etcd Bitnami -> own chart -> 3.7 rehearsal: tls.sh, values, Go loadgen image, rehearsal.sh; own README)
 tests/           offline script regression tests with fake minikube/helm/kubectl
 examples/        standalone sidecar demos, each with its own COMMAND.md/README.md
 ```
