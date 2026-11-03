@@ -9,8 +9,10 @@ on:
 permissions:
   contents: read
 
+# github.workflow is the caller's name under workflow_call, so the CI run used
+# by Release never shares (or cancels) a group with the regular CI run.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

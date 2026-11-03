@@ -9,8 +9,8 @@ Local Minikube lab (single or multi-cluster): one zsh script for cluster lifecyc
 ## CI and releases
 
 - `.github/workflows/ci.yml`: syntax, `SCRIPT_VERSION` format, smoke test, actionlint; on PRs fails if `minikube.sh` changed without a higher `SCRIPT_VERSION`. Also `workflow_call`ed by release.
-- `.github/workflows/security.yml`: gitleaks, OpenSSF Scorecard (SARIF to code scanning; needs a public repo).
-- `.github/workflows/release.yml`: on `main` changes to `minikube.sh`, after CI, creates release `v<SCRIPT_VERSION>` (assets `minikube.sh`, `minikube.sh.sha256`) if it does not exist. Releasing = bumping `SCRIPT_VERSION`.
+- `.github/workflows/security.yml`: gitleaks over full history via a digest-pinned image (accepted findings in `.gitleaksignore`), OpenSSF Scorecard (SARIF to code scanning; needs a public repo).
+- `.github/workflows/release.yml`: on every push to `main` (manual runs only on `main`), after CI, creates release `v<SCRIPT_VERSION>` (assets `minikube.sh`, `minikube.sh.sha256`) if it does not exist. Releasing = bumping `SCRIPT_VERSION`.
 - Workflow rules: pin actions to full SHAs with a version comment, least-privilege `permissions`, `persist-credentials: false`, pass `${{ }}` via `env` (never inline in `run`). Dependabot updates the pins.
 - `.coderabbit.yaml`: CodeRabbit PR reviews (ru-RU) with path instructions for `minikube.sh` and workflows.
 

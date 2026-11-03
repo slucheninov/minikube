@@ -1,11 +1,10 @@
 name: Release
 
-# Publishes v<SCRIPT_VERSION> when minikube.sh on main carries a version that
-# has no release yet. Assets: minikube.sh and its SHA-256 checksum.
+# On every push to main (or manual run on main), publishes v<SCRIPT_VERSION>
+# if that release does not exist yet. Assets: minikube.sh and its SHA-256.
 on:
   push:
     branches: [main]
-    paths: [minikube.sh]
   workflow_dispatch:
 
 permissions:
@@ -21,6 +20,7 @@ jobs:
 
   release:
     needs: ci
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
