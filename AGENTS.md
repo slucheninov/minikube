@@ -1,71 +1,42 @@
 # AGENTS.md
 
-This file provides guidance to AI coding agents (Claude Code, Codex, Gemini CLI, Cursor, etc.) when working with code in this repository.
+Guidance for AI coding agents (Claude Code, Codex, Gemini CLI, Cursor, etc.) in this repository.
 
 ## Overview
 
-Local Minikube lab (single or multi-cluster): one zsh script for cluster lifecycle, helmfile for Helm services, plain manifests. No build system or linter config. Offline script regression tests: `python3 -m unittest discover -s tests -v` (requires zsh, bash, jq; substitutes all cluster commands). Static checks: `zsh -n minikube.sh`, `shellcheck` for bash/sh scripts, `go vet` in `scripts/etcd-rehearsal/loadgen`, `helmfile -l name=<release> template` for releases. Integration testing requires a Minikube cluster.
+Local Minikube lab (single or multi-cluster): one zsh script for cluster lifecycle. No versions are hardcoded in the repo: they are pinned in `~/.minikube.env` by `./minikube.sh upgrade`. Helm charts, services and manifests are not kept here; install them ad hoc. No build system, linter config or tests. Static check: `zsh -n minikube.sh`. Integration testing requires a Minikube cluster.
 
-## Main entrypoint: `minikube.sh`
+## `minikube.sh`
 
-zsh script (`set -euo pipefail`), configured only via env vars: `CLUSTERS`, `K8S_VERSION`, `CNI`, `SERVICE_CIDR`, `METRICS_SERVER`, `METRICS_VERSION`, `REGISTRY`, `INSECURE_REGISTRIES`.
+zsh (`set -euo pipefail`). Settings (`CONFIG_KEYS`): `CLUSTERS`, `K8S_VERSION`, `CNI`, `SERVICE_CIDR`, `METRICS_SERVER`, `METRICS_VERSION`, `REGISTRY`, `INSECURE_REGISTRIES`, `UPDATE_CHECK`. It is the user's personal wrapper: defaults are `CLUSTERS=cluster-1`, `METRICS_SERVER=true`, `REGISTRY=true`, `UPDATE_CHECK=true`; `K8S_VERSION`/`METRICS_VERSION` empty = minikube default / latest chart.
+
+- `load_config` parses `~/.minikube.env` as `KEY=VALUE` data (never `source`): known keys only, value charset `[A-Za-z0-9._,:/-]`, optional quotes; env vars take precedence. `write_config` updates keys atomically, preserving other lines.
+- Do not add version literals to the script or docs as defaults. The only version in the script is its own `SCRIPT_VERSION` (semver): bump it on every change to `minikube.sh`.
+- The script must stay standalone (no repo-relative paths): `self install [dir]` copies `SCRIPT_PATH` to `~/bin/minikube.sh` (temp + `mv`, 755, `.bak`). Copies are identified by reading the `readonly SCRIPT_VERSION=` line as text (`script_version_of`, never executed); foreign files are never overwritten/removed, downgrades need TTY confirmation. `check_installed_copy` (part of the update check) highlights an outdated `~/bin` copy.
 
 ```bash
 ./minikube.sh start|stop|status|delete|updates
+./minikube.sh upgrade [plan|k8s|metrics|all|minikube]
+./minikube.sh self install|uninstall [dir]
+./minikube.sh version
 ./minikube.sh metrics install|uninstall
 ./minikube.sh registry install|uninstall|port
-CLUSTERS="cluster-1,cluster-2" CNI=cilium METRICS_SERVER=true ./minikube.sh start
 ```
 
-Key behavior:
-- Cluster lifecycle and registry commands loop over `CLUSTERS` (comma-split with zsh `${(@s:,:)CLUSTERS}`); the minikube profile name equals the cluster name.
-- `cluster-1..3` get fixed service CIDRs `172.16.{1,2,3}.0/24` (`SERVICE_CIDR_MAP`) so multi-cluster setups don't overlap; `SERVICE_CIDR` overrides for all clusters.
-- `build_start_args` returns minikube args as an array in `$reply` (no `eval`); `CLUSTER_LIST` is the parsed `CLUSTERS`.
-- After each start, `sync_cluster_kubeconfig` writes a standalone, flattened kubeconfig to `~/.kube/clusters/<cluster>` (mode 600, atomic via temp file + `mv`). `start` therefore requires `kubectl`.
-- Metrics-server is installed only on the **first** cluster in `CLUSTERS`, with explicit Helm `--kube-context` and `--kubelet-insecure-tls`; it does not switch the active profile/context.
-- `INSECURE_REGISTRIES` is baked in at node creation: changing it requires `delete` + `start`.
-- Missing `minikube`/`helm` goes through `ensure_installed <tool> <docs-url>`. Interactive Homebrew installation is offered only when a terminal and brew are available; otherwise the command fails with the documentation URL. No downloaded installer scripts are executed.
-- Profile names, duplicate/empty entries, boolean flags and command arguments are validated before tool calls. Profile names cannot contain path separators. Stop/delete/status attempt every profile and return nonzero if any operation fails.
-- `delete` asks for interactive confirmation.
-- `updates` is an explicit read-only network check requiring curl + jq. It compares installed Minikube against GitHub stable releases and configured `K8S_VERSION` against Kubernetes stable markers (same-branch patch and latest stable). It never contacts clusters or installs tools; ordinary lifecycle commands do not trigger it. Exit 1 means an incomplete/failed check, not an available update.
-
-When bumping the default Kubernetes version, change `DEFAULT_K8S_VERSION`, the header comment, and the README env var table/examples (`show_usage` interpolates the defaults).
-
-## Repository layout
-
-```
-minikube.sh      cluster lifecycle (the only entrypoint script)
-helmfile.yaml    every Helm release: repo, chart, pinned version, namespace, labels (group: platform|dns|monitoring|data|demo)
-charts/<name>/   values.yaml (+ values-<variant>.yaml) for the release of the same name
-manifests/       plain YAML for `kubectl apply -f` (argocd, istio, rabbitmq CRs, scale test)
-docker/<name>/   local images; run.sh builds from its own dir and runs on Docker network `netlite`
-scripts/         vault-init.sh (init|unseal 3-node raft Vault; explicit KUBE_CONTEXT; keys -> gitignored .secrets/)
-                 etcd-rehearsal/ (coredns etcd Bitnami -> own chart -> 3.7 rehearsal: tls.sh, values, Go loadgen image, rehearsal.sh; own README)
-tests/           offline script regression tests with fake minikube/helm/kubectl
-examples/        standalone sidecar demos, each with its own COMMAND.md/README.md
-```
-
-Helm releases (needs `helmfile` + `helm-diff` plugin):
-
-```bash
-helmfile list
-helmfile -l name=<release> apply | destroy   # always use a selector; bare apply installs everything
-helmfile -l group=monitoring apply
-helmfile -l name=<release> template          # render locally to validate (downloads charts)
-COREDNS_VALUES=values-etcd.yaml helmfile -l name=coredns apply   # values variant via env var
-```
-
-- Adding a service: a `releases:` entry in `helmfile.yaml` (+ repo if new) and `charts/<name>/values.yaml`; update the README table.
-- Values variants are chosen with `{{ env "X_VALUES" | default "values.yaml" }}` in the release (`COREDNS_VALUES`, `EXTERNAL_DNS_VALUES`).
-- metrics-server is intentionally not in helmfile: `./minikube.sh metrics install` owns it.
-- `helmDefaults` sets `wait` and `createNamespace` for all releases.
-- CoreDNS `values-redis.yaml` points at the `keydb` release; etcd used by `values-etcd.yaml` (CoreDNS, external-dns) is not deployed by this repo.
-- Manifests in `manifests/` depend on their releases (rabbitmq CRs need `rabbitmq-operator`, argocd service needs `argocd`).
-- Fixed, basic test credentials in values/manifests are intentional for this local Minikube lab and are explicitly accepted by the user. Do not replace them with generated credentials or require manual Secret provisioning. RabbitMQ Secrets are included in `manifests/rabbitmq/users.yaml`; the exporter references the monitoring Secret to avoid password duplication.
-- Grafana/Argo CD retain fixed test admin credentials. Argo CD ingress is disabled and server TLS enabled by default. Docker demo ports and Envoy's demo admin listener bind to loopback.
-- Vault init refuses to overwrite any keys file and preserves partial output on failure. `unseal` reuses valid saved keys; keys travel over stdin, and the root token is never printed. `KEYS_FILE` can isolate credentials for different clusters.
+- Commands loop over `CLUSTER_LIST` (`CLUSTERS` split with `${(@s:,:)CLUSTERS}`); profile name = cluster name = kube context.
+- `cluster-1..3` get fixed service CIDRs `172.16.{1,2,3}.0/24` (`SERVICE_CIDR_MAP`); `SERVICE_CIDR` overrides for all.
+- `build_start_args` returns minikube args in `$reply` (no `eval`).
+- After each start, `sync_cluster_kubeconfig` writes `~/.kube/clusters/<cluster>` (flattened, mode 600, temp file + `mv`); `start` requires `kubectl`.
+- metrics-server is installed only on the **first** cluster, with explicit `--kube-context` and `--kubelet-insecure-tls`.
+- `INSECURE_REGISTRIES` is baked in at node creation (needs `delete` + `start` to change).
+- Missing `minikube`/`helm` go through `ensure_installed`: Homebrew prompt only with a TTY + brew, never downloaded installers.
+- Names, duplicates, booleans and arguments are validated before tool calls; names cannot contain path separators. stop/delete/status attempt every profile and return nonzero on any failure. `delete` asks for confirmation.
+- Versions (curl + jq): installed Minikube vs GitHub latest stable; `K8S_VERSION` vs newest stable from `minikube config defaults kubernetes-version -o json` (offline, what the installed Minikube supports); `METRICS_VERSION` vs `helm search repo`. `stable.txt` is only reported (needs newer Minikube).
+  - `auto_check_updates` runs after `start`/`status` in quiet mode (`UPDATES_QUIET`, 3/5 s curl timeouts, Helm cache only, stderr suppressed): prints `[UPDATE]` lines and an unpinned warning, never changes the exit code; skipped without curl/jq or with `UPDATE_CHECK=false`.
+  - `updates` prints the full report; exit 1 = incomplete check.
+  - `upgrade`/`upgrade plan` only prints planned changes. `upgrade k8s|metrics|all` writes the selected keys (`resolve_targets` -> `print_plan` -> confirm in TTY -> `~/.minikube.env.bak` -> `write_config`). `upgrade minikube` runs `brew upgrade minikube` (TTY + brew-managed only). Never lowers a pin, never touches clusters, never writes the file implicitly.
 
 ## Notes
 
-- `README.md` is the user-facing doc (minikube.sh usage, registry workflows, services table, layout); keep it and this file in sync when changing behavior or layout.
-- `tls/`, `credentials.json`, `.env`, `.secrets/` are gitignored.
+- `README.md` is the user-facing doc; keep it and this file in sync when changing behavior or layout.
+- `tls/`, `credentials.json`, `.env`, `.secrets/`, `.remember/` are gitignored.

@@ -21,4 +21,5 @@ credentials.json
 .secrets/
 .env.*
 !.env.example
-__pycache__/
+
+.remember/
