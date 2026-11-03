@@ -1,0 +1,63 @@
+name: Release
+
+# Publishes v<SCRIPT_VERSION> when minikube.sh on main carries a version that
+# has no release yet. Assets: minikube.sh and its SHA-256 checksum.
+on:
+  push:
+    branches: [main]
+    paths: [minikube.sh]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read SCRIPT_VERSION
+        id: version
+        run: |
+          version="$(sed -n 's/^readonly SCRIPT_VERSION="\([0-9]*\.[0-9]*\.[0-9]*\)"$/\1/p' minikube.sh)"
+          test -n "${version}"
+          echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check existing release
+        id: exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "${TAG} already released; nothing to do."
+            echo "found=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "found=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Create release
+        if: steps.exists.outputs.found == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          sha256sum minikube.sh > minikube.sh.sha256
+          gh release create "${TAG}" minikube.sh minikube.sh.sha256 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "${TAG}" \
+            --generate-notes

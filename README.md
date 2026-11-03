@@ -1,15 +1,37 @@
-# Minikube Lab
+# minikube.sh
 
-A personal zsh wrapper over Minikube: `./minikube.sh start` brings up `cluster-1`
-with metrics-server and the registry addon, and highlights new Minikube and
-Kubernetes releases. Versions are not hardcoded: they are pinned in
-`~/.minikube.env`, outside the repo, by explicit `./minikube.sh upgrade ...` commands. Helm charts, services and manifests are
-installed ad hoc as needed; the repo only keeps the cluster lifecycle.
+[![CI](https://github.com/slucheninov/minikube/actions/workflows/ci.yml/badge.svg)](https://github.com/slucheninov/minikube/actions/workflows/ci.yml)
+[![Security](https://github.com/slucheninov/minikube/actions/workflows/security.yml/badge.svg)](https://github.com/slucheninov/minikube/actions/workflows/security.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/slucheninov/minikube/badge)](https://scorecard.dev/viewer/?uri=github.com/slucheninov/minikube)
+[![Release](https://img.shields.io/github/v/release/slucheninov/minikube?sort=semver)](https://github.com/slucheninov/minikube/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CodeRabbit Reviews](https://img.shields.io/coderabbit/prs/github/slucheninov/minikube?utm_source=oss&utm_medium=github&utm_campaign=slucheninov%2Fminikube&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)](https://coderabbit.ai)
+
+## About
+
+A single-file zsh wrapper over [Minikube](https://minikube.sigs.k8s.io/) for local
+Kubernetes labs. One command starts one or several clusters with metrics-server,
+an image registry and non-overlapping service CIDRs, exports a standalone
+kubeconfig per cluster, and highlights new Minikube, Kubernetes and
+metrics-server releases. Versions are never hardcoded: they are pinned in
+`~/.minikube.env` by explicit `upgrade` commands. The script installs itself to
+`~/bin` and works without this repository. Helm charts, services and manifests
+are installed ad hoc; the repo only keeps the cluster lifecycle.
 
 ## Install
 
+From the latest release (checksum verified):
+
+```bash
+cd "$(mktemp -d)"
+curl -fsSLO https://github.com/slucheninov/minikube/releases/latest/download/minikube.sh
+curl -fsSLO https://github.com/slucheninov/minikube/releases/latest/download/minikube.sh.sha256
+shasum -a 256 -c minikube.sh.sha256
+zsh minikube.sh self install
+```
+
 The script is standalone (settings live in `~/.minikube.env`), so it can run
-outside the repo. It installs itself:
+outside the repo. From a clone it installs itself the same way:
 
 ```bash
 ./minikube.sh self install          # copies to ~/bin/minikube.sh
@@ -165,3 +187,27 @@ kubectl run -it --rm --restart=Never dnsutils --image=autosetup/dnsutils:0.0.4 b
 ```
 
 Multiple clusters need distinct service CIDRs (see `SERVICE_CIDR`).
+
+## Development and releases
+
+- CI (`.github/workflows/ci.yml`): `zsh -n`, an offline smoke test with fake
+  `minikube`/`kubectl`/`helm` (`.github/ci/smoke.zsh`), actionlint, and on PRs a
+  check that `SCRIPT_VERSION` was bumped whenever `minikube.sh` changed.
+- Security (`.github/workflows/security.yml`): gitleaks secret scan and OpenSSF
+  Scorecard (weekly and on `main`). Actions are pinned to commit SHAs and kept
+  current by Dependabot.
+- Reviews: [CodeRabbit](https://coderabbit.ai) reviews every PR (`.coderabbit.yaml`).
+- Releases (`.github/workflows/release.yml`): after CI passes on `main`, a new
+  `SCRIPT_VERSION` in `minikube.sh` is published as release `v<version>` with
+  `minikube.sh` and `minikube.sh.sha256`. To release: bump `SCRIPT_VERSION` and merge.
+
+Run the checks locally:
+
+```bash
+zsh -n minikube.sh
+zsh .github/ci/smoke.zsh
+```
+
+## License
+
+[MIT](LICENSE). Security issues: see [SECURITY.md](SECURITY.md).

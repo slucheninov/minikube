@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint and smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install zsh
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh
+
+      - name: Syntax check
+        run: zsh -n minikube.sh
+
+      - name: Validate SCRIPT_VERSION
+        run: |
+          version="$(sed -n 's/^readonly SCRIPT_VERSION="\([0-9]*\.[0-9]*\.[0-9]*\)"$/\1/p' minikube.sh)"
+          test -n "${version}" || { echo "::error::SCRIPT_VERSION must be x.y.z"; exit 1; }
+          echo "SCRIPT_VERSION=${version}"
+
+      - name: Smoke test (fake minikube/kubectl/helm)
+        run: zsh .github/ci/smoke.zsh
+
+      - name: Lint workflows (actionlint)
+        uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
+
+  version-bump:
+    name: SCRIPT_VERSION bumped
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require a higher version when minikube.sh changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git diff --quiet "${BASE_SHA}" HEAD -- minikube.sh; then
+            echo "minikube.sh unchanged"; exit 0
+          fi
+          read_version() { sed -n 's/^readonly SCRIPT_VERSION="\([0-9.]*\)"$/\1/p'; }
+          base="$(git show "${BASE_SHA}:minikube.sh" | read_version)"
+          head="$(read_version < minikube.sh)"
+          echo "base=${base} head=${head}"
+          if [ "${base}" = "${head}" ] || [ "$(printf '%s\n%s\n' "${base}" "${head}" | sort -V | tail -1)" != "${head}" ]; then
+            echo "::error file=minikube.sh::minikube.sh changed: bump SCRIPT_VERSION above ${base}"
+            exit 1
+          fi

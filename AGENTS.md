@@ -4,7 +4,15 @@ Guidance for AI coding agents (Claude Code, Codex, Gemini CLI, Cursor, etc.) in 
 
 ## Overview
 
-Local Minikube lab (single or multi-cluster): one zsh script for cluster lifecycle. No versions are hardcoded in the repo: they are pinned in `~/.minikube.env` by `./minikube.sh upgrade`. Helm charts, services and manifests are not kept here; install them ad hoc. No build system, linter config or tests. Static check: `zsh -n minikube.sh`. Integration testing requires a Minikube cluster.
+Local Minikube lab (single or multi-cluster): one zsh script for cluster lifecycle. No versions are hardcoded in the repo: they are pinned in `~/.minikube.env` by `./minikube.sh upgrade`. Helm charts, services and manifests are not kept here; install them ad hoc. MIT licensed. Checks: `zsh -n minikube.sh` and `zsh .github/ci/smoke.zsh` (offline smoke test with fake minikube/kubectl/helm; extend it when changing behavior). Integration testing requires a Minikube cluster.
+
+## CI and releases
+
+- `.github/workflows/ci.yml`: syntax, `SCRIPT_VERSION` format, smoke test, actionlint; on PRs fails if `minikube.sh` changed without a higher `SCRIPT_VERSION`. Also `workflow_call`ed by release.
+- `.github/workflows/security.yml`: gitleaks, OpenSSF Scorecard (SARIF to code scanning; needs a public repo).
+- `.github/workflows/release.yml`: on `main` changes to `minikube.sh`, after CI, creates release `v<SCRIPT_VERSION>` (assets `minikube.sh`, `minikube.sh.sha256`) if it does not exist. Releasing = bumping `SCRIPT_VERSION`.
+- Workflow rules: pin actions to full SHAs with a version comment, least-privilege `permissions`, `persist-credentials: false`, pass `${{ }}` via `env` (never inline in `run`). Dependabot updates the pins.
+- `.coderabbit.yaml`: CodeRabbit PR reviews (ru-RU) with path instructions for `minikube.sh` and workflows.
 
 ## `minikube.sh`
 

@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: ru-RU
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_instructions:
+    - path: "minikube.sh"
+      instructions: |
+        zsh script (not bash): `set -euo pipefail`, zsh expansions like ${(@s:,:)...}, ${(P)...}, [[ =~ ]] with $match.
+        Check that:
+        - SCRIPT_VERSION (semver) is bumped for every change;
+        - no Kubernetes/Minikube/chart version literals are added as defaults (versions live in ~/.minikube.env);
+        - the script stays standalone (no repo-relative paths) so `self install` copies keep working;
+        - ~/.minikube.env is parsed as data and never sourced/evaluated;
+        - files are written atomically and nothing is overwritten without confirmation or backup;
+        - README.md and AGENTS.md are updated when behavior changes.
+    - path: ".github/workflows/**"
+      instructions: |
+        Actions must be pinned to full commit SHAs with a version comment, use least-privilege
+        `permissions`, `persist-credentials: false`, and pass `${{ }}` values via env, not inline in `run`.
+  tools:
+    shellcheck:
+      enabled: true
+    actionlint:
+      enabled: true
+    gitleaks:
+      enabled: true
+chat:
+  auto_reply: true
