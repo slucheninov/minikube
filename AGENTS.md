@@ -34,15 +34,17 @@ zsh (`set -euo pipefail`). Settings (`CONFIG_KEYS`): `CLUSTERS`, `K8S_VERSION`, 
 - Commands loop over `CLUSTER_LIST` (`CLUSTERS` split with `${(@s:,:)CLUSTERS}`); profile name = cluster name = kube context.
 - `cluster-1..3` get fixed service CIDRs `172.16.{1,2,3}.0/24` (`SERVICE_CIDR_MAP`); `SERVICE_CIDR` overrides for all.
 - `build_start_args` returns minikube args in `$reply` (no `eval`).
+- The script exports `KUBECONFIG=~/.kube/config` for its own run (an exported per-cluster `KUBECONFIG` would otherwise get minikube's updated port while `~/.kube/config` stays stale).
 - After each start, `sync_cluster_kubeconfig` writes `~/.kube/clusters/<cluster>` (flattened, mode 600, temp file + `mv`); `start` requires `kubectl`.
 - metrics-server is installed only on the **first** cluster, with explicit `--kube-context` and `--kubelet-insecure-tls`.
+- `sync_k8s_pin` (before each `minikube start`, needs jq): if the existing profile's Kubernetes (from `minikube profile list -o json`) is newer than `K8S_VERSION`, raises the pin for the run and in `~/.minikube.env` (`.bak`, no prompt; skipped when `K8S_VERSION` came from the environment). This is the only implicit config write; it never lowers a pin.
 - `INSECURE_REGISTRIES` is baked in at node creation (needs `delete` + `start` to change).
 - Missing `minikube`/`helm` go through `ensure_installed`: Homebrew prompt only with a TTY + brew, never downloaded installers.
 - Names, duplicates, booleans and arguments are validated before tool calls; names cannot contain path separators. stop/delete/status attempt every profile and return nonzero on any failure. `delete` asks for confirmation.
 - Versions (curl + jq): installed Minikube vs GitHub latest stable; `K8S_VERSION` vs newest stable from `minikube config defaults kubernetes-version -o json` (offline, what the installed Minikube supports); `METRICS_VERSION` vs `helm search repo`. `stable.txt` is only reported (needs newer Minikube).
   - `auto_check_updates` runs after `start`/`status` in quiet mode (`UPDATES_QUIET`, 3/5 s curl timeouts, Helm cache only, stderr suppressed): prints `[UPDATE]` lines and an unpinned warning, never changes the exit code; skipped without curl/jq or with `UPDATE_CHECK=false`.
   - `updates` prints the full report; exit 1 = incomplete check.
-  - `upgrade`/`upgrade plan` only prints planned changes. `upgrade k8s|metrics|all` writes the selected keys (`resolve_targets` -> `print_plan` -> confirm in TTY -> `~/.minikube.env.bak` -> `write_config`). `upgrade minikube` runs `brew upgrade minikube` (TTY + brew-managed only). Never lowers a pin, never touches clusters, never writes the file implicitly.
+  - `upgrade`/`upgrade plan` only prints planned changes. `upgrade k8s|metrics|all` writes the selected keys (`resolve_targets` -> `print_plan` -> confirm in TTY -> `~/.minikube.env.bak` -> `write_config`). `upgrade minikube` runs `brew upgrade minikube` (TTY + brew-managed only). Never lowers a pin, never touches clusters, never writes the file implicitly (except `sync_k8s_pin` on `start`).
 
 ## Notes
 
