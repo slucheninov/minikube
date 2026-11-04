@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-readonly SCRIPT_VERSION="1.0.0"
+readonly SCRIPT_VERSION="1.1.1"
 readonly SCRIPT_PATH="${${(%):-%x}:A}"
 readonly SCRIPT_NAME="$(basename "${(%):-%x}")"
 readonly INSTALL_DIR="${HOME}/bin"
@@ -82,6 +82,11 @@ write_config() {
   mv -f "${tmp}" "${CONFIG_FILE}"
 }
 
+# Always work with the default kubeconfig. A KUBECONFIG exported in one shell
+# (e.g. ~/.kube/clusters/<name>) would otherwise receive minikube's new API
+# server port instead of ~/.kube/config, so new terminals lose access.
+export KUBECONFIG="${HOME}/.kube/config"
+readonly K8S_FROM_ENV="${+parameters[K8S_VERSION]}"
 load_config
 
 CLUSTERS="${CLUSTERS:-cluster-1}"
@@ -185,6 +190,30 @@ sync_cluster_kubeconfig() {
   log_info "Updated kubeconfig: ${config_file}"
 }
 
+# Minikube cannot downgrade an existing cluster. If it already runs a newer
+# Kubernetes than K8S_VERSION, raise the pin for this run and in ~/.minikube.env
+# (never lowered; skipped when K8S_VERSION comes from the environment).
+sync_k8s_pin() {
+  local cluster="$1" current
+  [[ -n "${K8S_VERSION}" ]] && command -v jq >/dev/null 2>&1 || return 0
+  current="$(minikube profile list -o json 2>/dev/null |
+    jq -r --arg c "${cluster}" '.valid[]? | select(.Name == $c) | .Config.KubernetesConfig.KubernetesVersion' 2>/dev/null |
+    head -n 1)" || return 0
+  current="${current#v}"
+  is_newer "${K8S_VERSION}" "${current}" || return 0
+  if (( K8S_FROM_ENV )); then
+    log_warn "${cluster} runs Kubernetes ${current}, newer than K8S_VERSION=${K8S_VERSION} (set in the environment); start may fail."
+    return 0
+  fi
+  log_update "K8S_VERSION: ${K8S_VERSION} -> ${current} (${cluster} already runs it; minikube cannot downgrade)"
+  if [[ -f "${CONFIG_FILE}" ]]; then
+    cp -p "${CONFIG_FILE}" "${CONFIG_FILE}.bak"
+  fi
+  write_config "K8S_VERSION=${current}" || return 1
+  K8S_VERSION="${current}"
+  log_info "Saved K8S_VERSION=${current} to ${CONFIG_FILE}."
+}
+
 start_clusters() {
   log_info "Clusters: ${CLUSTERS} | Kubernetes: ${K8S_VERSION:-minikube default} | CNI: ${CNI:-default}"
   log_info "Metrics-server: ${METRICS_SERVER} | Registry: ${REGISTRY} | Insecure registries: ${INSECURE_REGISTRIES:-none}"
@@ -193,6 +222,7 @@ start_clusters() {
   local cluster
   for cluster in "${CLUSTER_LIST[@]}"; do
     log_info "Starting cluster: ${cluster}"
+    sync_k8s_pin "${cluster}"
     build_start_args "${cluster}"
     minikube "${reply[@]}"
     sync_cluster_kubeconfig "${cluster}"

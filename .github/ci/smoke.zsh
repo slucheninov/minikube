@@ -15,9 +15,11 @@ cat > "${tmp}/bin/minikube" <<FAKE
 #!/bin/sh
 echo "minikube \$*" >> "${log}"
 case "\$1" in
+  start) echo "kubeconfig \$KUBECONFIG" >> "${log}" ;;
   version) echo v1.0.0 ;;
   ip) echo 192.168.49.2 ;;
   config) echo '["v1.37.0","v1.36.4"]' ;;
+  profile) echo '{"valid":[{"Name":"cluster-1","Config":{"KubernetesConfig":{"KubernetesVersion":"v1.35.9"}}}],"invalid":[]}' ;;
 esac
 exit 0
 FAKE
@@ -40,12 +42,30 @@ grep -q '^helm upgrade --install metrics-server .*--kube-context cluster-1' "${l
 kc="${tmp}/home/.kube/clusters/cluster-1"
 [[ "$(stat -c %a "${kc}" 2>/dev/null || stat -f %Lp "${kc}")" == 600 ]] || fail "kubeconfig mode"
 
+# An exported KUBECONFIG must not redirect minikube away from ~/.kube/config.
+: > "${log}"
+run KUBECONFIG=/elsewhere/cluster-1 zsh "${repo}/minikube.sh" start >/dev/null || fail "start with KUBECONFIG"
+grep -qx "kubeconfig ${tmp}/home/.kube/config" "${log}" || fail "default kubeconfig not used"
+
 # Versions come from ~/.minikube.env; env vars override it.
 printf 'K8S_VERSION=1.36.4\nMETRICS_VERSION=3.12.0\n' > "${tmp}/home/.minikube.env"
 : > "${log}"
 run METRICS_VERSION=3.13.0 zsh "${repo}/minikube.sh" start >/dev/null || fail "start pinned"
 grep -q -- '--kubernetes-version=1.36.4' "${log}" || fail "K8S_VERSION from config"
 grep -q -- '--version 3.13.0' "${log}" || fail "env overrides config"
+
+# start raises a pin that is below the existing cluster's version (no downgrade).
+if command -v jq >/dev/null 2>&1; then
+  printf '# keep\nK8S_VERSION=1.35.1\n' > "${tmp}/home/.minikube.env"
+  : > "${log}"
+  mk start >/dev/null || fail "start with stale pin"
+  grep -qx 'K8S_VERSION=1.35.9' "${tmp}/home/.minikube.env" || fail "pin not synced to cluster"
+  grep -qx '# keep' "${tmp}/home/.minikube.env" || fail "config lines lost"
+  grep -q -- '--kubernetes-version=1.35.9' "${log}" || fail "start uses synced pin"
+  printf 'K8S_VERSION=1.35.1\n' > "${tmp}/home/.minikube.env"
+  run K8S_VERSION=1.35.1 zsh "${repo}/minikube.sh" start >/dev/null 2>&1 || fail "start with env pin"
+  grep -qx 'K8S_VERSION=1.35.1' "${tmp}/home/.minikube.env" || fail "env pin must not rewrite config"
+fi
 
 # Invalid input is rejected before tool calls.
 expect_fail start extra

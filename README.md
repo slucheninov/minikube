@@ -108,8 +108,13 @@ CNI=cilium
 
 ### Behavior
 
+- The script always uses `~/.kube/config` (it overrides an exported `KUBECONFIG`
+  for its own run), so new terminals see the cluster's current API server port.
 - After each start, `~/.kube/clusters/<cluster>` gets a standalone kubeconfig
   with that cluster's context and credentials (mode `600`, replaced atomically).
+- `start` raises `K8S_VERSION` in `~/.minikube.env` (backup `.bak`) when an existing
+  cluster already runs a newer Kubernetes, because Minikube cannot downgrade; the
+  pin is never lowered and an env-var `K8S_VERSION` is not written to the file.
 - metrics-server goes to the **first** cluster in `CLUSTERS` via an explicit
   Helm `--kube-context`, with `--kubelet-insecure-tls`; the active context is not changed.
 - `stop`/`delete`/`status` try every profile and exit nonzero if any failed.
